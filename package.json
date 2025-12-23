@@ -1,0 +1,89 @@
+{
+  "name": "iotdashboard",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": "^20.19.0 || >=22.12.0"
+  },
+  "scripts": {
+    "electron:dev": "concurrently \"npm run dev\" \"electron electron/main.js\"",
+    "electron:build": "npm run build && electron-builder",
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test:e2e": "playwright test",
+    "lint:oxlint": "oxlint . --fix -D correctness --ignore-path .gitignore",
+    "lint:eslint": "eslint . --fix --cache",
+    "lint": "run-s lint:*",
+    "format": "prettier --write --experimental-cli src/"
+  },
+  "main": "electron/main.js",
+  "build": {
+    "appId": "com.iot.smarthome",
+    "productName": "IOT SmartHome Control",
+    "copyright": "Copyright © 2025 by You",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "package.json"
+    ],
+    "win": {
+      "icon": "build/icon.ico",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true
+    }
+  },
+  "dependencies": {
+    "@capacitor/android": "^8.0.0",
+    "@capacitor/haptics": "^8.0.0",
+    "@capacitor/ios": "^8.0.0",
+    "@capacitor/local-notifications": "^8.0.0",
+    "@tailwindcss/vite": "^4.1.18",
+    "axios": "^1.13.2",
+    "concurrently": "^9.2.1",
+    "mqtt": "^5.14.1",
+    "pinia": "^3.0.4",
+    "vue": "^3.5.25",
+    "vue-router": "^4.6.3"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^8.0.0",
+    "@capacitor/core": "^8.0.0",
+    "@eslint/js": "^9.39.1",
+    "@playwright/test": "^1.57.0",
+    "@prettier/plugin-oxc": "^0.0.5",
+    "@vitejs/plugin-vue": "^6.0.2",
+    "@vue/eslint-config-prettier": "^10.2.0",
+    "autoprefixer": "^10.4.23",
+    "electron": "^39.2.7",
+    "electron-builder": "^26.0.12",
+    "eslint": "^9.39.1",
+    "eslint-plugin-oxlint": "~1.29.0",
+    "eslint-plugin-playwright": "^2.3.0",
+    "eslint-plugin-vue": "~10.5.1",
+    "globals": "^16.5.0",
+    "npm-run-all2": "^8.0.4",
+    "oxlint": "~1.29.0",
+    "postcss": "^8.5.6",
+    "prettier": "3.6.2",
+    "tailwindcss": "^4.1.18",
+    "vite": "^7.2.4",
+    "vite-plugin-node-polyfills": "^0.24.0",
+    "vite-plugin-vue-devtools": "^8.0.5"
+  }
+}

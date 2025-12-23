@@ -1,0 +1,36 @@
+# --- CHỈ GIỮ CODE VUEJS ---
+
+# Dependency & Build
+node_modules/
+jspm_packages/
+dist/
+dist-ssr/
+build/
+.cache/
+*.tsbuildinfo
+
+# Mobile & Desktop (Ignore hoàn toàn vì bạn chỉ muốn giữ web code)
+android/
+ios/
+capacitor.config.ts
+release/
+# Environment & Secrets
+.env
+.env.*
+!.env.example
+*.local
+*.exe
+*.dmg
+*.AppImage
+# Logs & System
+*.log
+.DS_Store
+.vscode/
+thumbs.db
+e2e/test-results/
+e2e/playwright-report/
+
+# Package manager
+pnpm-lock.yaml
+npm-debug.log*
+yarn-error.log*
