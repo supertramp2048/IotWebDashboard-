@@ -10,7 +10,7 @@
           {{ isConnected ? 'Connected via WebSocket' : 'Connecting...' }}
         </div>
         <div>
-          <button @click="logoutClick" class="text-red-500">log out</button>
+          <button @click="logoutClick" class="text-red-500 hover:text-red-700 transition">log out</button>
         </div>
       </div>
     </header>
@@ -37,7 +37,7 @@
           </div>
         </div>
 
-        <div class="md:col-span-9 grid grid-cols-1 sm:grid-cols-3 gap-6">
+        <div class="md:col-span-9 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
           <div 
             v-for="(val, key) in switches" 
             :key="key"
@@ -47,7 +47,7 @@
             <span class="text-sm font-semibold text-gray-600 uppercase">{{ key }}</span>
             <button 
               @click="toggleSwitch(key)"
-              class="relative inline-flex h-8 w-14 items-center rounded-full transition-colors duration-300 focus:outline-none"
+              class="relative inline-flex h-8 w-14 items-center rounded-full transition-colors duration-300 focus:outline-none mt-2 mb-2"
               :class="val ? 'bg-blue-600' : 'bg-gray-200'"
               :disabled="uiLocked"
             >
@@ -57,7 +57,7 @@
               />
             </button>
             <div class="mt-4 text-4xl" :class="val ? 'text-blue-500' : 'text-gray-300'">
-              <i class="mdi" :class="getIcon(key)"></i>
+              <i class="mdi" :class="getIcon(key, val)"></i>
             </div>
           </div>
         </div>
@@ -86,17 +86,21 @@
         </div>
       </div>
     </main>
+    
     <div v-if="emergency" class="bg-red-500 w-full rounded-2xl">
-      <p class="text-2xl font-bold text-gray-800 uppercase">
+      <p class="text-2xl font-bold text-gray-800 uppercase px-4 pt-4">
         {{ isFireDetected ? (isGasOver ? 'CÓ CHÁY & RÒ RỈ GAS!' : 'ĐANG XẢY RA CHÁY!') : 'PHÁT HIỆN RÒ RỈ GAS!' }}
       </p>
-      <div class="bg-red-50 py-4 rounded-2xl border-2 border-red-200">
-        <span class="text-white text-sm block mb-1">Nồng độ gas hiện tại</span>
-        <span class="text-5xl font-mono font-black text-red-600">{{ telemetry.gas }}</span>
-        <span class="text-xl font-bold text-red-400"> ppm</span>
+      <div class="bg-red-50 py-4 m-4 rounded-2xl border-2 border-red-200 flex flex-col items-center justify-center">
+        <span class="text-gray-600 text-sm block mb-1">Nồng độ gas hiện tại</span>
+        <div>
+          <span class="text-5xl font-mono font-black text-red-600">{{ telemetry.gas }}</span>
+          <span class="text-xl font-bold text-red-400"> ppm</span>
+        </div>
       </div>
-      <p class="text-white font-medium italic animate-pulse">Vui lòng kiểm tra hệ thống và ngắt nguồn điện!</p>
+      <p class="text-white font-medium italic animate-pulse pb-4 text-center">Vui lòng kiểm tra hệ thống và ngắt nguồn điện!</p>
     </div>
+
     <div v-if="emergency && !ConfirmEmergency" class="fixed inset-0 z-[999] flex items-center justify-center bg-red-600/90 backdrop-blur-sm animate-pulse-fast">
       <div class="bg-white p-10 rounded-3xl shadow-2xl text-center max-w-lg mx-4 border-[10px] border-red-500 shadow-red-500/50 scale-up-center">
         <div class="mb-6 relative">
@@ -115,7 +119,7 @@
           </div>
           <p class="text-gray-600 font-medium italic animate-pulse">Vui lòng kiểm tra hệ thống và ngắt nguồn điện!</p>
         </div>
-        <button @click="ConfirmEmergency = true" class="mt-8 px-8 py-3 bg-red-600 text-white rounded-full font-bold hover:bg-red-700 active:scale-90">
+        <button @click="ConfirmEmergency = true" class="mt-8 px-8 py-3 bg-red-600 text-white rounded-full font-bold hover:bg-red-700 active:scale-90 transition-transform">
           ĐÃ XÁC NHẬN
         </button>
       </div>
@@ -124,7 +128,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
+import { ref, reactive, watch, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import ElementLoader from '../components/loader.vue'
 import { Haptics } from '@capacitor/haptics'
@@ -145,7 +149,15 @@ let cardsLoading = ref([])
 let socket = null
 
 const telemetry = reactive({ gas: 0 })
-const switches = reactive({ 'Window': false, 'Garage': false, 'Curtain': false })
+
+// CẬP NHẬT: Thêm 'Door' vào object quản lý switch
+const switches = reactive({ 
+  'Window': false, 
+  'Garage': false, 
+  'Curtain': false,
+  'Door': false // <--- THÊM MỚI
+})
+
 const leds = reactive([
   { label: 'Nhà Xe', value: false },
   { label: 'Phòng bếp', value: false },
@@ -158,11 +170,13 @@ if (alarmAudio) alarmAudio.loop = true
 
 // --- 2. HELPER FUNCTIONS ---
 
-const getIcon = (key) => {
+// CẬP NHẬT: Thêm Icon cho Door và logic thay đổi Icon theo trạng thái đóng/mở
+const getIcon = (key, val) => {
   const map = {
-    'Window': 'mdi-window-open-variant',
-    'Curtain': 'mdi-curtains',
-    'Garage': 'mdi-garage-variant'
+    'Window': val ? 'mdi-window-open-variant' : 'mdi-window-closed-variant',
+    'Curtain': val ? 'mdi-curtains' : 'mdi-curtains-closed',
+    'Garage': val ? 'mdi-garage-open-variant' : 'mdi-garage-variant',
+    'Door': val ? 'mdi-door-open' : 'mdi-door-closed' // <--- THÊM MỚI ICON CỬA
   }
   return map[key] || 'mdi-power-plug'
 }
@@ -176,7 +190,7 @@ const sendPushover = async (message) => {
     token: token,
     user: user,
     message: message,
-    title: " CẢNH BÁO SMART HOME",
+    title: "⚠️ CẢNH BÁO SMART HOME",
     priority: "2",
     retry: "30",
     expire: "3600",
@@ -204,7 +218,7 @@ watch(emergency, async (isEmergency) => {
     const alertMsg = `Cảnh báo: ${isFireDetected.value ? 'CHÁY' : ''} ${isGasOver.value ? 'RÒ RỈ GAS' : ''}! Gas: ${telemetry.gas} ppm.`
     
     sendPushover(alertMsg)
-    if (Capacitor.getPlatform() === 'web') showDesktopNotification("KHẨN CẤP", alertMsg)
+    if (Capacitor.getPlatform() === 'web') showDesktopNotification("⚠️ KHẨN CẤP", alertMsg)
 
     try {
       await Haptics.vibrate({ duration: 1000 })
@@ -219,7 +233,7 @@ watch(emergency, async (isEmergency) => {
           sound: 'alarm.mp3'
         })
         await LocalNotifications.schedule({
-          notifications: [{ title: " KHẨN CẤP", body: alertMsg, id: 100, sound: 'alarm.mp3', ongoing: true }]
+          notifications: [{ title: "🚨 KHẨN CẤP", body: alertMsg, id: 100, sound: 'alarm.mp3', ongoing: true }]
         })
       }
     } catch (e) { console.error(e) }
@@ -248,6 +262,8 @@ onMounted(() => {
     if (data.window) switches['Window'] = data.window[0][1] === 'true'
     if (data.garage) switches['Garage'] = data.garage[0][1] === 'true'
     if (data.curtain) switches['Curtain'] = data.curtain[0][1] === 'true'
+    if (data.door) switches['Door'] = data.door[0][1] === 'true' // <--- CẬP NHẬT: Lắng nghe trạng thái Cửa chính từ Server
+    
     if (data.led1) leds[0].value = data.led1[0][1] === 'true'
     if (data.led2) leds[1].value = data.led2[0][1] === 'true'
     if (data.led3) leds[2].value = data.led3[0][1] === 'true'

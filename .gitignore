@@ -34,3 +34,5 @@ e2e/playwright-report/
 pnpm-lock.yaml
 npm-debug.log*
 yarn-error.log*
+android.zip
+release.zip
