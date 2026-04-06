@@ -53,7 +53,10 @@
     "@capacitor/haptics": "^8.0.0",
     "@capacitor/ios": "^8.0.0",
     "@capacitor/local-notifications": "^8.0.0",
+<<<<<<< HEAD
     "@google/genai": "^1.48.0",
+=======
+>>>>>>> origin/main
     "@tailwindcss/vite": "^4.1.18",
     "axios": "^1.13.2",
     "concurrently": "^9.2.1",

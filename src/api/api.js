@@ -3,7 +3,11 @@ import axios from 'axios';
 // Lấy Device ID từ file .env
 const deviceId = import.meta.env.VITE_DEVICE_ID;
 
+<<<<<<< HEAD
 // QUAN TRỌNG: Để rỗng chuỗi này.
+=======
+// QUAN TRỌNG: Để rỗng chuỗi này. 
+>>>>>>> origin/main
 // Vì chúng ta dùng Proxy trong vite.config.js, nên request sẽ gửi đến localhost hiện tại.
 const API_URL = import.meta.env.VITE_API_URL || 'https://demo.thingsboard.io';
 //console.log(" API URL đang dùng là:", API_URL); // Bật Console (F12) để xem nó in ra cái gì
@@ -47,10 +51,17 @@ export async function login(username, password) {
     try {
         // Đường dẫn này khớp với Proxy: /api -> https://demo.thingsboard.io/api
         const res = await API.post('/api/auth/login', { username, password });
+<<<<<<< HEAD
 
         accessToken = res.data.token;
         refreshToken = res.data.refreshToken;
 
+=======
+        
+        accessToken = res.data.token; 
+        refreshToken = res.data.refreshToken;
+        
+>>>>>>> origin/main
         localStorage.setItem('tb_token', accessToken);
         localStorage.setItem('tb_refreshToken', refreshToken);
 
@@ -71,7 +82,11 @@ export function logout() {
 // 6. Gửi lệnh điều khiển (RPC OneWay)
 export async function sendRpcCommand(method, params) {
     if (!deviceId) return console.error("Thiếu Device ID");
+<<<<<<< HEAD
 
+=======
+    
+>>>>>>> origin/main
     // SỬA: Đường dẫn chuẩn của ThingsBoard là /plugins/rpc/oneway
     return API.post(`/api/plugins/rpc/oneway/${deviceId}`, {
         method: method,
@@ -86,7 +101,11 @@ export async function getAttributes() {
     // SỬA: Bỏ chữ "/DEVICE" thừa trong URL cũ
     // SỬA: Thêm CLIENT_SCOPE hoặc SERVER_SCOPE nếu cần, mặc định lấy tất cả
     return API.get(
+<<<<<<< HEAD
         `/api/plugins/telemetry/${deviceId}/values/attributes?keys=curtain,window,garage,door,autoCurtain,led1,led2,led3,led4`
+=======
+        `/api/plugins/telemetry/${deviceId}/values/attributes?keys=curtain,window,garage,led1,led2,led3,led4`
+>>>>>>> origin/main
     );
 }
 
@@ -94,6 +113,7 @@ export async function getAttributes() {
 
 export async function getDeviceAttributes(keys) {
     if (!deviceId) return console.error("Thiếu Device ID");
+<<<<<<< HEAD
 
     // Nếu có truyền keys (ví dụ: "led1,fan"), API sẽ chỉ trả về các key đó
     const params = keys ? `?keys=${keys}` : '';
@@ -101,6 +121,15 @@ export async function getDeviceAttributes(keys) {
     // Endpoint chuẩn: /api/plugins/telemetry/{deviceId}/values/attributes
     const res = await API.get(`/api/plugins/telemetry/${deviceId}/values/attributes${params}`);
     return res.data;
+=======
+    
+    // Nếu có truyền keys (ví dụ: "led1,fan"), API sẽ chỉ trả về các key đó
+    const params = keys ? `?keys=${keys}` : '';
+    
+    // Endpoint chuẩn: /api/plugins/telemetry/{deviceId}/values/attributes
+    const res = await API.get(`/api/plugins/telemetry/${deviceId}/values/attributes${params}`);
+    return res.data; 
+>>>>>>> origin/main
 }
 
 // 8. Lấy dữ liệu cảm biến mới nhất (Telemetry - Dùng cho Nhiệt độ, Gas)
@@ -108,7 +137,11 @@ export async function getLatestTelemetry(keys) {
     if (!deviceId) return console.error("Thiếu Device ID");
 
     const params = keys ? `?keys=${keys}` : '';
+<<<<<<< HEAD
 
+=======
+    
+>>>>>>> origin/main
     // Endpoint chuẩn: /api/plugins/telemetry/{deviceId}/values/timeseries
     const res = await API.get(`/api/plugins/telemetry/${deviceId}/values/timeseries${params}`);
     return res.data;
@@ -118,7 +151,11 @@ export async function getLatestTelemetry(keys) {
 export function updateRealtime(onData) {
     const token = localStorage.getItem('tb_token');
     // Lưu ý: Biến deviceId và WS_URL đã được khai báo ở đầu file như code trước
+<<<<<<< HEAD
     // const deviceId = ...;
+=======
+    // const deviceId = ...; 
+>>>>>>> origin/main
     // const WS_URL = ...;
 
     if (!token || !deviceId) return;
@@ -135,7 +172,11 @@ export function updateRealtime(onData) {
                 entityId: deviceId,
                 scope: "LATEST_TELEMETRY",
                 cmdId: 10,
+<<<<<<< HEAD
                 keys: "window,garage,curtain,door,autoCurtain,emergency,gas,fire,light"
+=======
+                keys: "window,garage,curtain,emergency,gas,fire"
+>>>>>>> origin/main
             }],
             // 2. Lắng nghe Attributes (Trạng thái công tắc)
             attrSubCmds: [
@@ -143,17 +184,29 @@ export function updateRealtime(onData) {
                     // Lắng nghe lệnh từ Web gửi xuống (Shared Attributes)
                     entityType: "DEVICE",
                     entityId: deviceId,
+<<<<<<< HEAD
                     scope: "SHARED_SCOPE",
                     cmdId: 11,
                     keys: "window,garage,curtain,door,autoCurtain,emergency,gas,fire,light"
+=======
+                    scope: "SHARED_SCOPE", 
+                    cmdId: 11,
+                    keys: "window,garage,curtain,emergency,gas,fire"
+>>>>>>> origin/main
                 },
                 {
                     // QUAN TRỌNG: Lắng nghe trạng thái từ ESP32 gửi lên (Client Attributes)
                     entityType: "DEVICE",
                     entityId: deviceId,
+<<<<<<< HEAD
                     scope: "CLIENT_SCOPE",
                     cmdId: 12, // ID mới cho Client Scope
                     keys: "window,garage,curtain,door,autoCurtain,emergency,gas,fire,light"
+=======
+                    scope: "CLIENT_SCOPE", 
+                    cmdId: 12, // ID mới cho Client Scope
+                    keys: "window,garage,curtain,emergency,gas,fire"
+>>>>>>> origin/main
                 }
             ]
         };
@@ -164,13 +217,21 @@ export function updateRealtime(onData) {
     ws.onmessage = (msg) => {
         try {
             const data = JSON.parse(msg.data);
+<<<<<<< HEAD
 
+=======
+            
+>>>>>>> origin/main
             // Kiểm tra xem dữ liệu đến từ cmdId nào (10, 11 hay 12 đều chấp nhận)
             if (data.subscriptionId === 10 || data.subscriptionId === 11 || data.subscriptionId === 12) {
                 // ThingsBoard trả về format: { data: { key: [[ts, value]] } }
                 if (data.data) {
                     //console.log(" Nhận dữ liệu mới từ TB:", data.data);
+<<<<<<< HEAD
                     onData(data.data);
+=======
+                    onData(data.data); 
+>>>>>>> origin/main
                 }
             }
         } catch (e) {
@@ -180,4 +241,8 @@ export function updateRealtime(onData) {
 
     ws.onclose = () => console.warn("WebSocket closed");
     return ws;
+<<<<<<< HEAD
 }
+=======
+}
+>>>>>>> origin/main

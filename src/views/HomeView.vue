@@ -38,6 +38,7 @@
         </div>
 
         <div class="md:col-span-9 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+<<<<<<< HEAD
           <div
             v-for="(val, key) in switches"
             :key="key"
@@ -47,12 +48,26 @@
             <ElementLoader v-if="cardsLoading.includes(key)" :loading="isCardLoading" />
             <span class="text-sm font-semibold text-gray-600 uppercase">{{ key }}</span>
             <button
+=======
+          <div
+            v-for="(val, key) in switches"
+            :key="key"
+            class="bg-white relative rounded-2xl shadow-md p-6 flex flex-col items-center justify-between transition-all hover:shadow-lg"
+          >
+            <ElementLoader v-if="cardsLoading.includes(key)" :loading="isCardLoading" />
+            <span class="text-sm font-semibold text-gray-600 uppercase">{{ key }}</span>
+            <button
+>>>>>>> origin/main
               @click="toggleSwitch(key)"
               class="relative inline-flex h-8 w-14 items-center rounded-full transition-colors duration-300 focus:outline-none mt-2 mb-2"
               :class="val ? 'bg-blue-600' : 'bg-gray-200'"
               :disabled="uiLocked"
             >
+<<<<<<< HEAD
               <span
+=======
+              <span
+>>>>>>> origin/main
                 class="inline-block h-6 w-6 transform rounded-full bg-white transition-transform duration-300 shadow-sm"
                 :class="val ? 'translate-x-7' : 'translate-x-1'"
               />
@@ -60,6 +75,7 @@
             <div class="mt-4 text-4xl" :class="val ? 'text-blue-500' : 'text-gray-300'">
               <i class="mdi" :class="getIcon(key, val)"></i>
             </div>
+<<<<<<< HEAD
 
             <button
               v-if="key === 'Curtain'"
@@ -70,13 +86,20 @@
             >
               {{ autoCurtainEnabled ? 'tự động: Bật' : 'tự động: Tắt' }}
             </button>
+=======
+>>>>>>> origin/main
           </div>
         </div>
       </div>
 
       <div class="grid grid-cols-2 md:grid-cols-4 gap-6 mb-6">
+<<<<<<< HEAD
         <div
           v-for="(led, index) in leds"
+=======
+        <div
+          v-for="(led, index) in leds"
+>>>>>>> origin/main
           :key="index"
           @click="toggleLed(index)"
           class="bg-white rounded-2xl shadow-md p-6 cursor-pointer group hover:bg-gray-50 transition-all active:scale-95 border border-transparent"
@@ -84,7 +107,11 @@
         >
           <div class="flex flex-col items-center text-center">
             <span class="text-sm font-medium text-gray-500 mb-4">{{ led.label }}</span>
+<<<<<<< HEAD
             <div
+=======
+            <div
+>>>>>>> origin/main
               class="w-16 h-16 rounded-full flex items-center justify-center mb-3 transition-colors duration-300 shadow-inner"
               :class="led.value ? 'bg-blue-500 text-white shadow-blue-200' : 'bg-gray-100 text-gray-300'"
             >
@@ -97,7 +124,11 @@
         </div>
       </div>
     </main>
+<<<<<<< HEAD
 
+=======
+
+>>>>>>> origin/main
     <div v-if="emergency" class="bg-red-500 w-full rounded-2xl">
       <p class="text-2xl font-bold text-gray-800 uppercase px-4 pt-4">
         {{ isFireDetected ? (isGasOver ? 'CÓ CHÁY & RÒ RỈ GAS!' : 'ĐANG XẢY RA CHÁY!') : 'PHÁT HIỆN RÒ RỈ GAS!' }}
@@ -135,6 +166,7 @@
         </button>
       </div>
     </div>
+<<<<<<< HEAD
 
     <button
       class="fixed right-6 bottom-6 z-[850] rounded-full bg-teal-600 px-5 py-3 text-white shadow-lg transition hover:bg-teal-700 active:scale-95"
@@ -161,6 +193,8 @@
         <VoiceAssistantModule @parsed-result="handleVoiceParsedResult" />
       </div>
     </div>
+=======
+>>>>>>> origin/main
   </div>
 </template>
 
@@ -168,7 +202,10 @@
 import { ref, reactive, watch, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import ElementLoader from '../components/loader.vue'
+<<<<<<< HEAD
 import VoiceAssistantModule from '../components/VoiceAssistantModule.vue'
+=======
+>>>>>>> origin/main
 import { Haptics } from '@capacitor/haptics'
 import { LocalNotifications } from '@capacitor/local-notifications'
 import { Capacitor } from '@capacitor/core'
@@ -183,6 +220,7 @@ const isFireDetected = ref(false)
 const ConfirmEmergency = ref(false)
 const isConnected = ref(localStorage.getItem('tb_token') != null)
 const uiLocked = ref(false)
+<<<<<<< HEAD
 const isVoiceAssistantOpen = ref(false)
 const lastVoiceParsedResult = ref(null)
 const autoCurtainEnabled = ref(true)
@@ -196,6 +234,17 @@ const telemetry = reactive({ gas: 0, light: 0 })
 const switches = reactive({
   'Window': false,
   'Garage': false,
+=======
+let cardsLoading = ref([])
+let socket = null
+
+const telemetry = reactive({ gas: 0 })
+
+// CẬP NHẬT: Thêm 'Door' vào object quản lý switch
+const switches = reactive({
+  'Window': false,
+  'Garage': false,
+>>>>>>> origin/main
   'Curtain': false,
   'Door': false // <--- THÊM MỚI
 })
@@ -207,6 +256,7 @@ const leds = reactive([
   { label: 'Phòng ngủ', value: false }
 ])
 
+<<<<<<< HEAD
 const VOICE_DEVICE_MAP = Object.freeze({
   den_phong_khach: { type: 'led', rpcLedNumber: 1, uiIndex: 2 },
   den_phong_ngu: { type: 'led', rpcLedNumber: 2, uiIndex: 3 },
@@ -223,6 +273,8 @@ const VOICE_ACTION_STATE = Object.freeze({
   switch: { mo: true, dong: false, bat: true, tat: false }
 })
 
+=======
+>>>>>>> origin/main
 const alarmAudio = typeof Audio !== 'undefined' ? new Audio('/alarm.mp3') : null
 if (alarmAudio) alarmAudio.loop = true
 
@@ -269,6 +321,7 @@ const showDesktopNotification = (title, body) => {
   }
 }
 
+<<<<<<< HEAD
 const getTBLatestValue = (value) => {
   if (!Array.isArray(value) || !value[0] || !Array.isArray(value[0])) {
     return value
@@ -287,12 +340,18 @@ const toTBNumber = (value, fallback = 0) => {
   return Number.isFinite(parsed) ? parsed : fallback
 }
 
+=======
+>>>>>>> origin/main
 // --- 3. WATCHERS ---
 
 watch(emergency, async (isEmergency) => {
   if (isEmergency) {
     const alertMsg = `Cảnh báo: ${isFireDetected.value ? 'CHÁY' : ''} ${isGasOver.value ? 'RÒ RỈ GAS' : ''}! Gas: ${telemetry.gas} ppm.`
+<<<<<<< HEAD
 
+=======
+
+>>>>>>> origin/main
     sendPushover(alertMsg)
     if (Capacitor.getPlatform() === 'web') showDesktopNotification("⚠️ KHẨN CẤP", alertMsg)
 
@@ -328,6 +387,7 @@ onMounted(() => {
   socket = updateRealtime((data) => {
     isConnected.value = true
     if (data.gas) {
+<<<<<<< HEAD
       telemetry.gas = toTBNumber(data.gas, telemetry.gas)
       isGasOver.value = telemetry.gas >= 1000
     }
@@ -346,6 +406,24 @@ onMounted(() => {
     if (data.led2) leds[1].value = toTBBoolean(data.led2)
     if (data.led3) leds[2].value = toTBBoolean(data.led3)
     if (data.led4) leds[3].value = toTBBoolean(data.led4)
+=======
+      telemetry.gas = Number(data.gas[0][1])
+      isGasOver.value = telemetry.gas >= 1000
+    }
+    if (data.fire) isFireDetected.value = Number(data.fire[0][1]) === 1
+    if (data.emergency) emergency.value = data.emergency[0][1] === 'true'
+
+    // Đồng bộ thiết bị
+    if (data.window) switches['Window'] = data.window[0][1] === 'true'
+    if (data.garage) switches['Garage'] = data.garage[0][1] === 'true'
+    if (data.curtain) switches['Curtain'] = data.curtain[0][1] === 'true'
+    if (data.door) switches['Door'] = data.door[0][1] === 'true' // <--- CẬP NHẬT: Lắng nghe trạng thái Cửa chính từ Server
+
+    if (data.led1) leds[0].value = data.led1[0][1] === 'true'
+    if (data.led2) leds[1].value = data.led2[0][1] === 'true'
+    if (data.led3) leds[2].value = data.led3[0][1] === 'true'
+    if (data.led4) leds[3].value = data.led4[0][1] === 'true'
+>>>>>>> origin/main
   })
 })
 
@@ -368,6 +446,7 @@ const toggleLed = async (index) => {
   leds[index].value = newState
 }
 
+<<<<<<< HEAD
 const toggleAutoCurtain = async () => {
   if (isAutoCurtainUpdating.value) {
     return
@@ -446,6 +525,10 @@ const handleVoiceParsedResult = async (parsedResult) => {
   }
 }
 
+=======
+const logoutClick = async () => { await logout(); router.push('/login') }
+
+>>>>>>> origin/main
 onUnmounted(() => { if (socket) socket.close() })
 </script>
 
@@ -458,4 +541,8 @@ onUnmounted(() => { if (socket) socket.close() })
 }
 .scale-up-center { animation: scale-up 0.4s both; }
 @keyframes scale-up { 0% { transform: scale(0.5); } 100% { transform: scale(1); } }
+<<<<<<< HEAD
 </style>
+=======
+</style>
+>>>>>>> origin/main
