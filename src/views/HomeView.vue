@@ -42,6 +42,7 @@
             v-for="(val, key) in switches"
             :key="key"
             class="bg-white relative rounded-2xl shadow-md p-6 flex flex-col items-center justify-between transition-all hover:shadow-lg"
+            :class="key === 'Curtain' ? 'pb-16' : ''"
           >
             <ElementLoader v-if="cardsLoading.includes(key)" :loading="isCardLoading" />
             <span class="text-sm font-semibold text-gray-600 uppercase">{{ key }}</span>
@@ -59,6 +60,16 @@
             <div class="mt-4 text-4xl" :class="val ? 'text-blue-500' : 'text-gray-300'">
               <i class="mdi" :class="getIcon(key, val)"></i>
             </div>
+
+            <button
+              v-if="key === 'Curtain'"
+              class="absolute bottom-4 right-4 rounded-full px-4 py-2 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-60"
+              :class="autoCurtainEnabled ? 'bg-emerald-600 text-white hover:bg-emerald-700' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'"
+              :disabled="isAutoCurtainUpdating"
+              @click="toggleAutoCurtain"
+            >
+              {{ autoCurtainEnabled ? 'tự động: Bật' : 'tự động: Tắt' }}
+            </button>
           </div>
         </div>
       </div>
@@ -174,10 +185,12 @@ const isConnected = ref(localStorage.getItem('tb_token') != null)
 const uiLocked = ref(false)
 const isVoiceAssistantOpen = ref(false)
 const lastVoiceParsedResult = ref(null)
+const autoCurtainEnabled = ref(true)
+const isAutoCurtainUpdating = ref(false)
 let cardsLoading = ref([])
 let socket = null
 
-const telemetry = reactive({ gas: 0 })
+const telemetry = reactive({ gas: 0, light: 0 })
 
 // CẬP NHẬT: Thêm 'Door' vào object quản lý switch
 const switches = reactive({
@@ -219,7 +232,7 @@ if (alarmAudio) alarmAudio.loop = true
 const getIcon = (key, val) => {
   const map = {
     'Window': val ? 'mdi-window-open-variant' : 'mdi-window-closed-variant',
-    'Curtain': val ? 'mdi-curtains' : 'mdi-curtains-closed',
+    'Curtain': val ? 'mdi-curtains-closed' : 'mdi-curtains',
     'Garage': val ? 'mdi-garage-open-variant' : 'mdi-garage-variant',
     'Door': val ? 'mdi-door-open' : 'mdi-door-closed' // <--- THÊM MỚI ICON CỬA
   }
@@ -254,6 +267,24 @@ const showDesktopNotification = (title, body) => {
   } else if (Notification.permission !== "denied") {
     Notification.requestPermission().then(p => { if (p === "granted") new Notification(title, { body }) })
   }
+}
+
+const getTBLatestValue = (value) => {
+  if (!Array.isArray(value) || !value[0] || !Array.isArray(value[0])) {
+    return value
+  }
+
+  return value[0][1]
+}
+
+const toTBBoolean = (value) => {
+  const raw = getTBLatestValue(value)
+  return raw === true || raw === 'true' || raw === 1 || raw === '1'
+}
+
+const toTBNumber = (value, fallback = 0) => {
+  const parsed = Number(getTBLatestValue(value))
+  return Number.isFinite(parsed) ? parsed : fallback
 }
 
 // --- 3. WATCHERS ---
@@ -297,22 +328,24 @@ onMounted(() => {
   socket = updateRealtime((data) => {
     isConnected.value = true
     if (data.gas) {
-      telemetry.gas = Number(data.gas[0][1])
+      telemetry.gas = toTBNumber(data.gas, telemetry.gas)
       isGasOver.value = telemetry.gas >= 1000
     }
-    if (data.fire) isFireDetected.value = Number(data.fire[0][1]) === 1
-    if (data.emergency) emergency.value = data.emergency[0][1] === 'true'
+    if (data.light) telemetry.light = toTBNumber(data.light, telemetry.light)
+    if (data.fire) isFireDetected.value = toTBNumber(data.fire) === 1
+    if (data.emergency) emergency.value = toTBBoolean(data.emergency)
 
     // Đồng bộ thiết bị
-    if (data.window) switches['Window'] = data.window[0][1] === 'true'
-    if (data.garage) switches['Garage'] = data.garage[0][1] === 'true'
-    if (data.curtain) switches['Curtain'] = data.curtain[0][1] === 'true'
-    if (data.door) switches['Door'] = data.door[0][1] === 'true' // <--- CẬP NHẬT: Lắng nghe trạng thái Cửa chính từ Server
+    if (data.window) switches['Window'] = toTBBoolean(data.window)
+    if (data.garage) switches['Garage'] = toTBBoolean(data.garage)
+    if (data.curtain) switches['Curtain'] = toTBBoolean(data.curtain)
+    if (data.door) switches['Door'] = toTBBoolean(data.door)
+    if (data.autoCurtain) autoCurtainEnabled.value = toTBBoolean(data.autoCurtain)
 
-    if (data.led1) leds[0].value = data.led1[0][1] === 'true'
-    if (data.led2) leds[1].value = data.led2[0][1] === 'true'
-    if (data.led3) leds[2].value = data.led3[0][1] === 'true'
-    if (data.led4) leds[3].value = data.led4[0][1] === 'true'
+    if (data.led1) leds[0].value = toTBBoolean(data.led1)
+    if (data.led2) leds[1].value = toTBBoolean(data.led2)
+    if (data.led3) leds[2].value = toTBBoolean(data.led3)
+    if (data.led4) leds[3].value = toTBBoolean(data.led4)
   })
 })
 
@@ -333,6 +366,24 @@ const toggleLed = async (index) => {
   const newState = !leds[index].value
   await sendRpcCommand(`setLed${index+1}`, newState)
   leds[index].value = newState
+}
+
+const toggleAutoCurtain = async () => {
+  if (isAutoCurtainUpdating.value) {
+    return
+  }
+
+  const nextState = !autoCurtainEnabled.value
+  isAutoCurtainUpdating.value = true
+
+  try {
+    await sendRpcCommand('setAutoCurtain', nextState)
+    autoCurtainEnabled.value = nextState
+  } catch (error) {
+    console.error('Toggle auto curtain failed:', error)
+  } finally {
+    isAutoCurtainUpdating.value = false
+  }
 }
 
 const logoutClick = async () => { await logout(); router.push('/login') }

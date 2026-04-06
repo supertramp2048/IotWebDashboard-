@@ -1,0 +1,466 @@
+#include <Arduino.h>
+#include <WiFi.h>
+#include <PubSubClient.h>
+#include <ESP32Servo.h>
+#include <Wire.h>
+#include <LiquidCrystal_I2C.h>
+#include <I2CKeyPad.h>
+#include <string.h>
+
+/* WIFI + THINGSBOARD (WOKWI GUEST NETWORK) */
+#define WIFI_SSID       "Wokwi-GUEST"
+#define WIFI_PASSWORD   ""
+#define TB_SERVER "demo.thingsboard.io"
+#define TB_TOKEN "hC7AZY9sXtoWcDoW8UtV"
+
+/* PINS - fixed conflict on 25, 26 */
+const int LED_PINS[4] = { 14, 16, 17, 27 };
+
+#define TRIG_PIN 5
+#define ECHO_PIN 18
+#define BUZZER_PIN 33
+#define PIR_PIN 19
+#define LED_PIR_PIN 32
+#define GAS_SENSOR_PIN 35
+#define FIRE_SENSOR_PIN 15
+#define LIGHT_BUTTON_PIN 4
+
+#define WINDOW_SERVO_PIN 2
+#define GARAGE_SERVO_PIN 12
+#define CURTAIN_SERVO_PIN 23
+#define DOOR_SERVO_PIN 13
+
+/* I2C CONFIG FOR LCD + KEYPAD - SEPARATE BUSES */
+#define LCD_I2C_SDA 21
+#define LCD_I2C_SCL 22
+#define KEYPAD_I2C_SDA 25
+#define KEYPAD_I2C_SCL 26
+#define LCD_ADDR 0x27
+#define KEYPAD_ADDR 0x20
+#define I2C_CLOCK 400000  // 400kHz
+
+/* TIMING */
+#define SENSOR_INTERVAL 200
+#define TELEMETRY_INTERVAL 1000
+#define SERVO_INTERVAL 20
+#define EMERGENCY_INTERVAL 50
+#define PIR_ON_TIME 10000
+// For button simulation, use short debounce so press/release can trigger quickly.
+#define LIGHT_DEBOUNCE 150
+
+WiFiClient espClient;
+PubSubClient client(espClient);
+
+Servo windowServo;
+Servo garageServo;
+Servo curtainServo;
+Servo doorServo;
+
+/* LCD + KEYPAD - SEPARATE I2C INSTANCES */
+LiquidCrystal_I2C lcd(LCD_ADDR, 16, 2);
+I2CKeyPad customKeypad(KEYPAD_ADDR);
+char keymap[16] = "123A456B789C*0#";
+
+/* DISPLAY CACHE */
+char lcdLine1Cache[17] = {0};
+char lcdLine2Cache[17] = {0};
+
+/* I2C synchronization */
+SemaphoreHandle_t lcdMutex;
+SemaphoreHandle_t keypadMutex;
+bool buzzerActive = false;
+
+/* SENSOR STATE */
+volatile int gasValue;
+volatile bool fireDetected;
+volatile bool pirState;
+volatile bool lightState;
+volatile float distanceCm;
+
+/* DEVICE STATE */
+volatile bool windowOpen = false;
+volatile bool garageOpen = false;
+volatile bool curtainClosed = false;
+volatile bool emergencyMode = false;
+volatile bool doorOpen = false;
+volatile bool autoCurtainEnabled = true;
+bool blockAppControl = false;
+
+/* KEYPAD PASSWORD */
+char currentPassword[16] = {0};
+int passwordLen = 0;
+const char correctPassword[5] = "1234";
+#define MAX_PASSWORD_LEN 15
+
+/* LIGHT DEBOUNCE */
+int lastLightState = -1;
+int confirmedLightState = -1;
+unsigned long lastLightChangeTime = 0;
+
+/* PIR */
+unsigned long pirLastActive = 0;
+portMUX_TYPE mux = portMUX_INITIALIZER_UNLOCKED;
+portMUX_TYPE garaStateMux = portMUX_INITIALIZER_UNLOCKED;
+
+/* DISTANCE */
+float getDistance() {
+  portENTER_CRITICAL(&mux);
+  digitalWrite(TRIG_PIN, LOW);
+  delayMicroseconds(2);
+  digitalWrite(TRIG_PIN, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(TRIG_PIN, LOW);
+  portEXIT_CRITICAL(&mux);
+
+  long duration = pulseIn(ECHO_PIN, HIGH, 30000);
+  if (duration == 0) return 999;
+  return duration * 0.034 / 2.0;
+}
+
+/* TELEMETRY */
+void sendTelemetry() {
+  String payload = "{";
+  payload += "\"gas\":" + String(gasValue) + ",";
+  payload += "\"fire\":" + String(fireDetected ? 1 : 0) + ",";
+  payload += "\"pir\":" + String(pirState ? 1 : 0) + ",";
+  payload += "\"light\":" + String(lightState ? 1 : 0) + ",";
+  payload += "\"curtain\":" + String(curtainClosed ? "true" : "false") + ",";
+  payload += "\"window\":" + String(windowOpen ? "true" : "false") + ",";
+  payload += "\"garage\":" + String(garageOpen ? "true" : "false") + ",";
+  payload += "\"door\":" + String(doorOpen ? "true" : "false") + ",";
+  payload += "\"autoCurtain\":" + String(autoCurtainEnabled ? "true" : "false") + ",";
+  payload += "\"emergency\":" + String(emergencyMode ? "true" : "false");
+  payload += "}";
+
+  client.publish("v1/devices/me/telemetry", payload.c_str());
+}
+
+/* MQTT RPC */
+void mqttCallback(char *topic, byte *payload, unsigned int length) {
+  char msg[512] = {0};
+  int msgLen = (length < 511) ? length : 511;
+  memcpy(msg, payload, msgLen);
+  msg[msgLen] = '\0';
+
+  Serial.println(msg);
+
+  bool state = strstr(msg, "\"params\":true") != NULL;
+
+  if (strstr(msg, "setLed1") != NULL) digitalWrite(LED_PINS[0], state);
+  if (strstr(msg, "setLed2") != NULL) digitalWrite(LED_PINS[1], state);
+  if (strstr(msg, "setLed3") != NULL) digitalWrite(LED_PINS[2], state);
+  if (strstr(msg, "setLed4") != NULL) digitalWrite(LED_PINS[3], state);
+
+  if (strstr(msg, "setWindow") != NULL && !blockAppControl) windowOpen = state;
+  if (strstr(msg, "setCurtain") != NULL) curtainClosed = state;
+  if (strstr(msg, "setAutoCurtain") != NULL) autoCurtainEnabled = state;
+  if (strstr(msg, "setDoor") != NULL && !blockAppControl) doorOpen = state;
+  if (strstr(msg, "setGarage") != NULL && !blockAppControl) {
+    portENTER_CRITICAL(&garaStateMux);
+    garageOpen = state;
+    portEXIT_CRITICAL(&garaStateMux);
+  }
+}
+
+/* LCD HELPER - Forward declaration */
+void updateLCD(const char* line1, const char* line2);
+
+/* LCD + KEYPAD TASK */
+void lcdKeypadTask(void *pv) {
+  updateLCD("He thong SS", "Nhap Pass:");
+
+  for (;;) {
+    char key = 0;
+
+    if (xSemaphoreTake(keypadMutex, pdMS_TO_TICKS(500)) == pdTRUE) {
+      uint8_t idx = customKeypad.getKey();
+      if (idx != 0xFF && idx < 16) key = keymap[idx];
+      xSemaphoreGive(keypadMutex);
+    }
+
+    if (key) {
+      if (key == '*') {
+        passwordLen = 0;
+        memset(currentPassword, 0, sizeof(currentPassword));
+        updateLCD("He thong SS", "Nhap Pass:");
+      } else if (key == '#') {
+        currentPassword[passwordLen] = 0;
+        if (strncmp(currentPassword, correctPassword, 4) == 0) {
+          updateLCD("Dung Pass!", "Mo Cua...");
+          doorOpen = true;
+          vTaskDelay(5000 / portTICK_PERIOD_MS);
+          updateLCD("Dong Cua...", "");
+          doorOpen = false;
+          vTaskDelay(1000 / portTICK_PERIOD_MS);
+        } else {
+          updateLCD("Sai Pass!", "Thu lai...");
+          if (!buzzerActive) {
+            buzzerActive = true;
+            tone(BUZZER_PIN, 500);
+            vTaskDelay(500 / portTICK_PERIOD_MS);
+            noTone(BUZZER_PIN);
+            buzzerActive = false;
+          }
+        }
+        passwordLen = 0;
+        memset(currentPassword, 0, sizeof(currentPassword));
+        vTaskDelay(1000 / portTICK_PERIOD_MS);
+        updateLCD("He thong SS", "Nhap Pass:");
+      } else {
+        if (passwordLen < MAX_PASSWORD_LEN) {
+          currentPassword[passwordLen++] = key;
+          char masked[17] = {0};
+          for (int i = 0; i < passwordLen; i++) masked[i] = '*';
+          updateLCD("Nhap Pass:", masked);
+        }
+      }
+      vTaskDelay(200 / portTICK_PERIOD_MS);
+    } else {
+      vTaskDelay(100 / portTICK_PERIOD_MS);
+    }
+  }
+}
+
+/* LCD HELPER */
+void updateLCD(const char* line1, const char* line2) {
+  if (strncmp(lcdLine1Cache, line1, 16) == 0 && strncmp(lcdLine2Cache, line2, 16) == 0) return;
+
+  if (xSemaphoreTake(lcdMutex, pdMS_TO_TICKS(500)) == pdTRUE) {
+    char padLine1[17] = {0};
+    char padLine2[17] = {0};
+    strncpy(padLine1, line1, 16);
+    strncpy(padLine2, line2, 16);
+    for (int i = strlen(padLine1); i < 16; i++) padLine1[i] = ' ';
+    for (int i = strlen(padLine2); i < 16; i++) padLine2[i] = ' ';
+    padLine1[16] = 0;
+    padLine2[16] = 0;
+
+    lcd.setCursor(0, 0);
+    lcd.print(padLine1);
+    lcd.setCursor(0, 1);
+    lcd.print(padLine2);
+
+    strcpy(lcdLine1Cache, padLine1);
+    strcpy(lcdLine2Cache, padLine2);
+    xSemaphoreGive(lcdMutex);
+  }
+}
+
+/* WIFI TASK */
+void wifiTask(void *pv) {
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  int wifiAttempts = 0;
+  while (WiFi.status() != WL_CONNECTED && wifiAttempts < 20) {
+    vTaskDelay(500 / portTICK_PERIOD_MS);
+    wifiAttempts++;
+  }
+
+  for (;;) {
+    if (WiFi.status() != WL_CONNECTED) {
+      WiFi.disconnect();
+      vTaskDelay(1000 / portTICK_PERIOD_MS);
+      WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+    }
+    vTaskDelay(5000 / portTICK_PERIOD_MS);
+  }
+}
+
+/* MQTT TASK */
+void mqttTask(void *pv) {
+  int waitCount = 0;
+  while (WiFi.status() != WL_CONNECTED && waitCount < 30) {
+    vTaskDelay(1000 / portTICK_PERIOD_MS);
+    waitCount++;
+  }
+
+  if (WiFi.status() != WL_CONNECTED) {
+    vTaskDelete(NULL);
+    return;
+  }
+
+  client.setServer(TB_SERVER, 1883);
+  client.setCallback(mqttCallback);
+
+  int mqttAttempts = 0;
+  for (;;) {
+    if (!client.connected()) {
+      mqttAttempts++;
+      if (client.connect("ESP32_DEVICE", TB_TOKEN, NULL)) {
+        client.subscribe("v1/devices/me/rpc/request/+");
+        mqttAttempts = 0;
+      } else {
+        vTaskDelay(5000 / portTICK_PERIOD_MS);
+      }
+    }
+    client.loop();
+    vTaskDelay(10 / portTICK_PERIOD_MS);
+  }
+}
+
+/* SENSOR TASK */
+void sensorTask(void *pv) {
+  for (;;) {
+    gasValue = analogRead(GAS_SENSOR_PIN);
+    fireDetected = (digitalRead(FIRE_SENSOR_PIN) == LOW);
+    pirState = digitalRead(PIR_PIN);
+    // Button simulation: hold button => light = 1, release => light = 0.
+    // Wiring: button between GPIO4 and GND with INPUT_PULLUP.
+    lightState = (digitalRead(LIGHT_BUTTON_PIN) == LOW);
+    distanceCm = getDistance();
+    if (pirState) pirLastActive = millis();
+
+    digitalWrite(LED_PIR_PIN, (millis() - pirLastActive < PIR_ON_TIME) ? HIGH : LOW);
+    vTaskDelay(SENSOR_INTERVAL / portTICK_PERIOD_MS);
+  }
+}
+
+/* EMERGENCY TASK */
+void emergencyTask(void *pv) {
+  for (;;) {
+    bool currentEmergency = (fireDetected || gasValue > 1000);
+
+    if (currentEmergency && !emergencyMode) {
+      emergencyMode = true;
+      blockAppControl = true;
+
+      windowOpen = true;
+      curtainClosed = true;
+
+      portENTER_CRITICAL(&garaStateMux);
+      garageOpen = true;
+      portEXIT_CRITICAL(&garaStateMux);
+
+      tone(BUZZER_PIN, 3000);
+      Serial.println("!!! EMERGENCY MODE: ACTIVE !!!");
+    }
+
+    else if (!currentEmergency && emergencyMode) {
+      emergencyMode = false;
+      blockAppControl = false;
+
+      windowOpen = false;
+      curtainClosed = false;
+
+      portENTER_CRITICAL(&garaStateMux);
+      garageOpen = false;
+      portEXIT_CRITICAL(&garaStateMux);
+
+      noTone(BUZZER_PIN);
+      Serial.println("--- EMERGENCY MODE: CLEARED ---");
+    }
+
+    vTaskDelay(EMERGENCY_INTERVAL / portTICK_PERIOD_MS);
+  }
+}
+
+/* SERVO TASK */
+void servoTask(void *pv) {
+  TickType_t lastWake = xTaskGetTickCount();
+
+  int lastWindowAngle = -1, lastGarageAngle = -1, lastCurtainAngle = -1, lastDoorAngle = -1;
+  bool lastBuzzerState = false;
+
+  for (;;) {
+    bool garage;
+    portENTER_CRITICAL(&garaStateMux);
+    garage = garageOpen;
+    portEXIT_CRITICAL(&garaStateMux);
+
+    if (lightState != lastLightState) {
+      lastLightState = lightState;
+      lastLightChangeTime = millis();
+    }
+
+    if ((millis() - lastLightChangeTime) > LIGHT_DEBOUNCE) {
+      if (confirmedLightState != lightState && !emergencyMode && autoCurtainEnabled) {
+        confirmedLightState = lightState;
+        curtainClosed = confirmedLightState;
+        Serial.printf("[AUTO CURTAIN] light=%d => curtainClosed=%d\n", confirmedLightState, curtainClosed);
+      }
+    }
+
+    int newWindowAngle = windowOpen ? 90 : 0;
+    int newGarageAngle = garage ? 180 : 0;
+    int newCurtainAngle = curtainClosed ? 180 : 0;
+    int newDoorAngle = doorOpen ? 90 : 0;
+
+    if (newWindowAngle != lastWindowAngle) { windowServo.write(newWindowAngle); lastWindowAngle = newWindowAngle; }
+    if (newGarageAngle != lastGarageAngle) { garageServo.write(newGarageAngle); lastGarageAngle = newGarageAngle; }
+    if (newCurtainAngle != lastCurtainAngle) { curtainServo.write(newCurtainAngle); lastCurtainAngle = newCurtainAngle; }
+    if (newDoorAngle != lastDoorAngle) { doorServo.write(newDoorAngle); lastDoorAngle = newDoorAngle; }
+
+    if (!emergencyMode) {
+      bool shouldBuzzer = (distanceCm < 5);
+      if (shouldBuzzer != lastBuzzerState) {
+        if (shouldBuzzer) tone(BUZZER_PIN, 2000);
+        else noTone(BUZZER_PIN);
+        lastBuzzerState = shouldBuzzer;
+      }
+    }
+    vTaskDelayUntil(&lastWake, SERVO_INTERVAL / portTICK_PERIOD_MS);
+  }
+}
+
+/* TELEMETRY TASK */
+void telemetryTask(void *pv) {
+  for (;;) {
+    if (client.connected()) sendTelemetry();
+    vTaskDelay(TELEMETRY_INTERVAL / portTICK_PERIOD_MS);
+  }
+}
+
+/* SETUP */
+void setupI2C() {
+  Wire.begin(KEYPAD_I2C_SDA, KEYPAD_I2C_SCL);
+  Wire.setClock(I2C_CLOCK);
+  customKeypad.begin();
+
+  Wire1.begin(LCD_I2C_SDA, LCD_I2C_SCL);
+  Wire1.setClock(I2C_CLOCK);
+  lcd.init();
+  lcd.backlight();
+}
+
+void setup() {
+  Serial.begin(115200);
+
+  lcdMutex = xSemaphoreCreateMutex();
+  keypadMutex = xSemaphoreCreateMutex();
+
+  if (lcdMutex == NULL || keypadMutex == NULL) while (1);
+
+  for (int i = 0; i < 4; i++) pinMode(LED_PINS[i], OUTPUT);
+
+  pinMode(TRIG_PIN, OUTPUT);
+  pinMode(ECHO_PIN, INPUT);
+  pinMode(BUZZER_PIN, OUTPUT);
+  pinMode(PIR_PIN, INPUT);
+  pinMode(LED_PIR_PIN, OUTPUT);
+
+  pinMode(FIRE_SENSOR_PIN, INPUT_PULLUP);
+  pinMode(LIGHT_BUTTON_PIN, INPUT_PULLUP);
+
+  setupI2C();
+
+  ESP32PWM::allocateTimer(0);
+  ESP32PWM::allocateTimer(1);
+  ESP32PWM::allocateTimer(2);
+  ESP32PWM::allocateTimer(3);
+
+  windowServo.attach(WINDOW_SERVO_PIN);
+  garageServo.attach(GARAGE_SERVO_PIN);
+  curtainServo.attach(CURTAIN_SERVO_PIN);
+  doorServo.attach(DOOR_SERVO_PIN);
+
+  xTaskCreatePinnedToCore(wifiTask, "wifi", 6000, NULL, 3, NULL, 0);
+  xTaskCreatePinnedToCore(mqttTask, "mqtt", 6000, NULL, 3, NULL, 0);
+  xTaskCreatePinnedToCore(telemetryTask, "telemetry", 6000, NULL, 1, NULL, 0);
+  xTaskCreatePinnedToCore(sensorTask, "sensor", 6000, NULL, 3, NULL, 1);
+  xTaskCreatePinnedToCore(emergencyTask, "emergency", 6000, NULL, 4, NULL, 1);
+  xTaskCreatePinnedToCore(servoTask, "servo", 6000, NULL, 3, NULL, 1);
+  xTaskCreatePinnedToCore(lcdKeypadTask, "lcd_kp", 4096, NULL, 2, NULL, 0);
+}
+
+void loop() {
+  vTaskDelay(10000 / portTICK_PERIOD_MS);
+}
