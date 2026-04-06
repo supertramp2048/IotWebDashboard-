@@ -232,7 +232,7 @@ if (alarmAudio) alarmAudio.loop = true
 const getIcon = (key, val) => {
   const map = {
     'Window': val ? 'mdi-window-open-variant' : 'mdi-window-closed-variant',
-    'Curtain': val ? 'mdi-curtains-closed' : 'mdi-curtains',
+    'Curtain': val ? 'mdi-curtains' : 'mdi-curtains-closed',
     'Garage': val ? 'mdi-garage-open-variant' : 'mdi-garage-variant',
     'Door': val ? 'mdi-door-open' : 'mdi-door-closed' // <--- THÊM MỚI ICON CỬA
   }

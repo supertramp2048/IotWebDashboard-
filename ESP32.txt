@@ -4,17 +4,17 @@
 #include <ESP32Servo.h>
 #include <Wire.h>
 #include <LiquidCrystal_I2C.h>
-#include <I2CKeyPad.h>
-#include <string.h>
+#include <I2CKeyPad.h> 
+#include <EEPROM.h>
 
-/* WIFI + THINGSBOARD (WOKWI GUEST NETWORK) */
-#define WIFI_SSID       "Wokwi-GUEST"
-#define WIFI_PASSWORD   ""
+/* WIFI + THINGSBOARD */
+#define WIFI_SSID      "Luc Ma 2002"
+#define WIFI_PASSWORD  "lm2002175"
 #define TB_SERVER "demo.thingsboard.io"
 #define TB_TOKEN "hC7AZY9sXtoWcDoW8UtV"
 
-/* PINS - fixed conflict on 25, 26 */
-const int LED_PINS[4] = { 14, 16, 17, 27 };
+/* PINS */
+const int LED_PINS[4] = { 14, 25, 26, 27 };
 
 #define TRIG_PIN 5
 #define ECHO_PIN 18
@@ -23,21 +23,18 @@ const int LED_PINS[4] = { 14, 16, 17, 27 };
 #define LED_PIR_PIN 32
 #define GAS_SENSOR_PIN 35
 #define FIRE_SENSOR_PIN 15
-#define LIGHT_BUTTON_PIN 4
+#define LIGHT_SENSOR_PIN 4  // ĐÃ SỬA: Chuyển từ 22 sang 4 để nhường I2C_SCL
 
-#define WINDOW_SERVO_PIN 2
+#define WINDOW_SERVO_PIN 2  // ĐÃ SỬA: Chuyển từ 21 sang 2 để nhường I2C_SDA
 #define GARAGE_SERVO_PIN 12
 #define CURTAIN_SERVO_PIN 23
-#define DOOR_SERVO_PIN 13
+#define DOOR_SERVO_PIN 13   // THÊM MỚI: Servo cửa chính
 
-/* I2C CONFIG FOR LCD + KEYPAD - SEPARATE BUSES */
-#define LCD_I2C_SDA 21
-#define LCD_I2C_SCL 22
-#define KEYPAD_I2C_SDA 25
-#define KEYPAD_I2C_SCL 26
-#define LCD_ADDR 0x27
-#define KEYPAD_ADDR 0x20
-#define I2C_CLOCK 400000  // 400kHz
+/* I2C CONFIG */
+#define I2C_SDA 21
+#define I2C_SCL 22
+#define LCD_ADDR 0x27    
+#define KEYPAD_ADDR 0x20 
 
 /* TIMING */
 #define SENSOR_INTERVAL 200
@@ -45,8 +42,7 @@ const int LED_PINS[4] = { 14, 16, 17, 27 };
 #define SERVO_INTERVAL 20
 #define EMERGENCY_INTERVAL 50
 #define PIR_ON_TIME 10000
-// For button simulation, use short debounce so press/release can trigger quickly.
-#define LIGHT_DEBOUNCE 150
+#define LIGHT_DEBOUNCE 5000
 
 WiFiClient espClient;
 PubSubClient client(espClient);
@@ -54,21 +50,18 @@ PubSubClient client(espClient);
 Servo windowServo;
 Servo garageServo;
 Servo curtainServo;
-Servo doorServo;
+Servo doorServo; // THÊM MỚI
 
-/* LCD + KEYPAD - SEPARATE I2C INSTANCES */
+/* I2C DEVICES */
 LiquidCrystal_I2C lcd(LCD_ADDR, 16, 2);
-I2CKeyPad customKeypad(KEYPAD_ADDR);
-char keymap[16] = "123A456B789C*0#";
+I2CKeyPad customKeypad(KEYPAD_ADDR); 
+char keymap[19] = "123A456B789C*0#D";
 
-/* DISPLAY CACHE */
-char lcdLine1Cache[17] = {0};
-char lcdLine2Cache[17] = {0};
-
-/* I2C synchronization */
-SemaphoreHandle_t lcdMutex;
-SemaphoreHandle_t keypadMutex;
-bool buzzerActive = false;
+String inputPassword = "";
+String currentPassword = "1234";
+const int EEPROM_SIZE = 64;
+const int ADDR_PASS = 0;
+const int PASS_LEN = 4;
 
 /* SENSOR STATE */
 volatile int gasValue;
@@ -82,27 +75,23 @@ volatile bool windowOpen = false;
 volatile bool garageOpen = false;
 volatile bool curtainClosed = false;
 volatile bool emergencyMode = false;
-volatile bool doorOpen = false;
+volatile bool doorOpen = false; // THÊM MỚI
 volatile bool autoCurtainEnabled = true;
 bool blockAppControl = false;
-
-/* KEYPAD PASSWORD */
-char currentPassword[16] = {0};
-int passwordLen = 0;
-const char correctPassword[5] = "1234";
-#define MAX_PASSWORD_LEN 15
 
 /* LIGHT DEBOUNCE */
 int lastLightState = -1;
 int confirmedLightState = -1;
 unsigned long lastLightChangeTime = 0;
 
-/* PIR */
+/* RTOS CONTROL & MUTEX */
 unsigned long pirLastActive = 0;
 portMUX_TYPE mux = portMUX_INITIALIZER_UNLOCKED;
 portMUX_TYPE garaStateMux = portMUX_INITIALIZER_UNLOCKED;
+portMUX_TYPE doorStateMux = portMUX_INITIALIZER_UNLOCKED; // THÊM MỚI
+SemaphoreHandle_t i2cMutex; // THÊM MỚI
 
-/* DISTANCE */
+/* DISTANCE - WATCHDOG SAFE FIX (GIỮ NGUYÊN TỪ CODE CŨ) */
 float getDistance() {
   portENTER_CRITICAL(&mux);
   digitalWrite(TRIG_PIN, LOW);
@@ -110,11 +99,145 @@ float getDistance() {
   digitalWrite(TRIG_PIN, HIGH);
   delayMicroseconds(10);
   digitalWrite(TRIG_PIN, LOW);
-  portEXIT_CRITICAL(&mux);
-
+  portEXIT_CRITICAL(&mux);  
+  
   long duration = pulseIn(ECHO_PIN, HIGH, 30000);
+  
   if (duration == 0) return 999;
   return duration * 0.034 / 2.0;
+}
+
+/* LCD HELPER (Sử dụng Mutex chống nhiễu) */
+void updateLCD(String line1, String line2) {
+    if (xSemaphoreTake(i2cMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+        while(line1.length() < 16) line1 += " ";
+        while(line2.length() < 16) line2 += " ";
+        lcd.setCursor(0, 0); lcd.print(line1);
+        lcd.setCursor(0, 1); lcd.print(line2);
+        xSemaphoreGive(i2cMutex);
+    }
+}
+
+void showHomePrompt() {
+  updateLCD("He thong SS", "A:DoiMK NhapMK");
+}
+
+String toMaskedText(size_t len) {
+  String masked = "";
+  for (size_t i = 0; i < len; i++) masked += "*";
+  return masked;
+}
+
+void savePasswordToEEPROM(const String &pass) {
+  for (int i = 0; i < PASS_LEN; i++) {
+    EEPROM.write(ADDR_PASS + i, pass[i]);
+  }
+  EEPROM.commit();
+}
+
+void loadPasswordFromEEPROM() {
+  String loaded = "";
+  bool valid = true;
+
+  for (int i = 0; i < PASS_LEN; i++) {
+    char c = (char)EEPROM.read(ADDR_PASS + i);
+    if (c < '0' || c > '9') {
+      valid = false;
+      break;
+    }
+    loaded += c;
+  }
+
+  if (!valid || loaded.length() != PASS_LEN) {
+    currentPassword = "1234";
+    savePasswordToEEPROM(currentPassword);
+    return;
+  }
+
+  currentPassword = loaded;
+}
+
+char readKeypadKey() {
+  char key = 0;
+  if (xSemaphoreTake(i2cMutex, pdMS_TO_TICKS(50)) == pdTRUE) {
+    if (customKeypad.isPressed()) {
+      uint8_t idx = customKeypad.getKey();
+      if (idx < 16) key = keymap[idx];
+    }
+    xSemaphoreGive(i2cMutex);
+  }
+  return key;
+}
+
+bool collectPinInput(String &output, const String &line1, bool allowCancel = true) {
+  output = "";
+  updateLCD(line1, "D:Huy");
+
+  while (output.length() < PASS_LEN) {
+    char key = readKeypadKey();
+
+    if (!key) {
+      vTaskDelay(80 / portTICK_PERIOD_MS);
+      continue;
+    }
+
+    if (key >= '0' && key <= '9') {
+      output += key;
+      updateLCD(line1, toMaskedText(output.length()));
+    } else if (allowCancel && key == 'D') {
+      return false;
+    }
+
+    vTaskDelay(180 / portTICK_PERIOD_MS);
+  }
+
+  return true;
+}
+
+void changePasswordFlow() {
+  String oldPass = "";
+  String newPass = "";
+  String confirmPass = "";
+
+  if (!collectPinInput(oldPass, "Nhap MK Cu (4so)")) {
+    updateLCD("Da huy doi MK", "");
+    vTaskDelay(800 / portTICK_PERIOD_MS);
+    return;
+  }
+
+  if (oldPass != currentPassword) {
+    updateLCD("MK Cu Sai!", "Thu lai...");
+    tone(BUZZER_PIN, 900, 250);
+    vTaskDelay(1200 / portTICK_PERIOD_MS);
+    return;
+  }
+
+  if (!collectPinInput(newPass, "Nhap MK Moi (4so)")) {
+    updateLCD("Da huy doi MK", "");
+    vTaskDelay(800 / portTICK_PERIOD_MS);
+    return;
+  }
+
+  if (!collectPinInput(confirmPass, "Nhap Lai MK Moi")) {
+    updateLCD("Da huy doi MK", "");
+    vTaskDelay(800 / portTICK_PERIOD_MS);
+    return;
+  }
+
+  if (confirmPass != newPass) {
+    updateLCD("Xac nhan khong khop", "Thu lai...");
+    tone(BUZZER_PIN, 900, 250);
+    vTaskDelay(1200 / portTICK_PERIOD_MS);
+    return;
+  }
+
+  currentPassword = newPass;
+  savePasswordToEEPROM(currentPassword);
+  updateLCD("Doi MK thanh cong", "");
+  tone(BUZZER_PIN, 1600, 120);
+  vTaskDelay(180 / portTICK_PERIOD_MS);
+  tone(BUZZER_PIN, 1600, 120);
+  vTaskDelay(1000 / portTICK_PERIOD_MS);
 }
 
 /* TELEMETRY */
@@ -127,7 +250,7 @@ void sendTelemetry() {
   payload += "\"curtain\":" + String(curtainClosed ? "true" : "false") + ",";
   payload += "\"window\":" + String(windowOpen ? "true" : "false") + ",";
   payload += "\"garage\":" + String(garageOpen ? "true" : "false") + ",";
-  payload += "\"door\":" + String(doorOpen ? "true" : "false") + ",";
+  payload += "\"door\":" + String(doorOpen ? "true" : "false") + ","; // THÊM MỚI
   payload += "\"autoCurtain\":" + String(autoCurtainEnabled ? "true" : "false") + ",";
   payload += "\"emergency\":" + String(emergencyMode ? "true" : "false");
   payload += "}";
@@ -135,128 +258,76 @@ void sendTelemetry() {
   client.publish("v1/devices/me/telemetry", payload.c_str());
 }
 
-/* MQTT RPC */
+/* MQTT RPC - FIX HEAP FRAGMENTATION (GIỮ NGUYÊN TỪ CODE CŨ) */
 void mqttCallback(char *topic, byte *payload, unsigned int length) {
   char msg[512] = {0};
   int msgLen = (length < 511) ? length : 511;
   memcpy(msg, payload, msgLen);
   msg[msgLen] = '\0';
-
+  
   Serial.println(msg);
-
+  
   bool state = strstr(msg, "\"params\":true") != NULL;
-
+  
   if (strstr(msg, "setLed1") != NULL) digitalWrite(LED_PINS[0], state);
   if (strstr(msg, "setLed2") != NULL) digitalWrite(LED_PINS[1], state);
   if (strstr(msg, "setLed3") != NULL) digitalWrite(LED_PINS[2], state);
   if (strstr(msg, "setLed4") != NULL) digitalWrite(LED_PINS[3], state);
-
-  if (strstr(msg, "setWindow") != NULL && !blockAppControl) windowOpen = state;
-  if (strstr(msg, "setCurtain") != NULL) curtainClosed = state;
-  if (strstr(msg, "setAutoCurtain") != NULL) autoCurtainEnabled = state;
-  if (strstr(msg, "setDoor") != NULL && !blockAppControl) doorOpen = state;
+  
+  if (strstr(msg, "setWindow") != NULL && !blockAppControl) {
+    windowOpen = state; 
+  }
+  
   if (strstr(msg, "setGarage") != NULL && !blockAppControl) {
     portENTER_CRITICAL(&garaStateMux);
     garageOpen = state;
     portEXIT_CRITICAL(&garaStateMux);
+    Serial.print("garageOpen = ");
+    Serial.println(garageOpen);
+  }
+  
+  if (strstr(msg, "setCurtain") != NULL) {
+    curtainClosed = state;
+  }
+
+  if (strstr(msg, "setAutoCurtain") != NULL) {
+    autoCurtainEnabled = state;
+  }
+
+  // THÊM MỚI: Điều khiển cửa từ App
+  if (strstr(msg, "setDoor") != NULL) {
+      portENTER_CRITICAL(&doorStateMux);
+      doorOpen = state;
+      portEXIT_CRITICAL(&doorStateMux);
   }
 }
 
-/* LCD HELPER - Forward declaration */
-void updateLCD(const char* line1, const char* line2);
-
-/* LCD + KEYPAD TASK */
-void lcdKeypadTask(void *pv) {
-  updateLCD("He thong SS", "Nhap Pass:");
-
-  for (;;) {
-    char key = 0;
-
-    if (xSemaphoreTake(keypadMutex, pdMS_TO_TICKS(500)) == pdTRUE) {
-      uint8_t idx = customKeypad.getKey();
-      if (idx != 0xFF && idx < 16) key = keymap[idx];
-      xSemaphoreGive(keypadMutex);
-    }
-
-    if (key) {
-      if (key == '*') {
-        passwordLen = 0;
-        memset(currentPassword, 0, sizeof(currentPassword));
-        updateLCD("He thong SS", "Nhap Pass:");
-      } else if (key == '#') {
-        currentPassword[passwordLen] = 0;
-        if (strncmp(currentPassword, correctPassword, 4) == 0) {
-          updateLCD("Dung Pass!", "Mo Cua...");
-          doorOpen = true;
-          vTaskDelay(5000 / portTICK_PERIOD_MS);
-          updateLCD("Dong Cua...", "");
-          doorOpen = false;
-          vTaskDelay(1000 / portTICK_PERIOD_MS);
-        } else {
-          updateLCD("Sai Pass!", "Thu lai...");
-          if (!buzzerActive) {
-            buzzerActive = true;
-            tone(BUZZER_PIN, 500);
-            vTaskDelay(500 / portTICK_PERIOD_MS);
-            noTone(BUZZER_PIN);
-            buzzerActive = false;
-          }
-        }
-        passwordLen = 0;
-        memset(currentPassword, 0, sizeof(currentPassword));
-        vTaskDelay(1000 / portTICK_PERIOD_MS);
-        updateLCD("He thong SS", "Nhap Pass:");
-      } else {
-        if (passwordLen < MAX_PASSWORD_LEN) {
-          currentPassword[passwordLen++] = key;
-          char masked[17] = {0};
-          for (int i = 0; i < passwordLen; i++) masked[i] = '*';
-          updateLCD("Nhap Pass:", masked);
-        }
-      }
-      vTaskDelay(200 / portTICK_PERIOD_MS);
-    } else {
-      vTaskDelay(100 / portTICK_PERIOD_MS);
-    }
-  }
-}
-
-/* LCD HELPER */
-void updateLCD(const char* line1, const char* line2) {
-  if (strncmp(lcdLine1Cache, line1, 16) == 0 && strncmp(lcdLine2Cache, line2, 16) == 0) return;
-
-  if (xSemaphoreTake(lcdMutex, pdMS_TO_TICKS(500)) == pdTRUE) {
-    char padLine1[17] = {0};
-    char padLine2[17] = {0};
-    strncpy(padLine1, line1, 16);
-    strncpy(padLine2, line2, 16);
-    for (int i = strlen(padLine1); i < 16; i++) padLine1[i] = ' ';
-    for (int i = strlen(padLine2); i < 16; i++) padLine2[i] = ' ';
-    padLine1[16] = 0;
-    padLine2[16] = 0;
-
-    lcd.setCursor(0, 0);
-    lcd.print(padLine1);
-    lcd.setCursor(0, 1);
-    lcd.print(padLine2);
-
-    strcpy(lcdLine1Cache, padLine1);
-    strcpy(lcdLine2Cache, padLine2);
-    xSemaphoreGive(lcdMutex);
-  }
-}
-
-/* WIFI TASK */
+/* WIFI TASK (GIỮ NGUYÊN TỪ CODE CŨ) */
 void wifiTask(void *pv) {
+  Serial.println("\n=== WiFi Task Started ===");
+  Serial.print("Connecting to SSID: ");
+  Serial.println(WIFI_SSID);
+
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+
   int wifiAttempts = 0;
   while (WiFi.status() != WL_CONNECTED && wifiAttempts < 20) {
+    Serial.print(".");
     vTaskDelay(500 / portTICK_PERIOD_MS);
     wifiAttempts++;
   }
 
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.println("\n[OK] WiFi Connected!");
+    Serial.print("IP Address: ");
+    Serial.println(WiFi.localIP());
+  } else {
+    Serial.println("\n[FAIL] WiFi Connection Failed!");
+  }
+
   for (;;) {
     if (WiFi.status() != WL_CONNECTED) {
+      Serial.println("[WARNING] WiFi Disconnected! Reconnecting...");
       WiFi.disconnect();
       vTaskDelay(1000 / portTICK_PERIOD_MS);
       WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
@@ -265,8 +336,10 @@ void wifiTask(void *pv) {
   }
 }
 
-/* MQTT TASK */
+/* MQTT TASK (GIỮ NGUYÊN TỪ CODE CŨ) */
 void mqttTask(void *pv) {
+  Serial.println("\n=== MQTT Task Started ===");
+  
   int waitCount = 0;
   while (WiFi.status() != WL_CONNECTED && waitCount < 30) {
     vTaskDelay(1000 / portTICK_PERIOD_MS);
@@ -286,79 +359,79 @@ void mqttTask(void *pv) {
     if (!client.connected()) {
       mqttAttempts++;
       if (client.connect("ESP32_DEVICE", TB_TOKEN, NULL)) {
+        Serial.println("[OK] MQTT Connected to ThingsBoard!");
         client.subscribe("v1/devices/me/rpc/request/+");
-        mqttAttempts = 0;
+        mqttAttempts = 0; 
       } else {
         vTaskDelay(5000 / portTICK_PERIOD_MS);
       }
+    } else {
+      if (mqttAttempts > 0) mqttAttempts = 0;
     }
     client.loop();
     vTaskDelay(10 / portTICK_PERIOD_MS);
   }
 }
 
-/* SENSOR TASK */
+/* SENSOR TASK (GIỮ NGUYÊN TỪ CODE CŨ) */
 void sensorTask(void *pv) {
+  Serial.println("Sensor Task");
   for (;;) {
     gasValue = analogRead(GAS_SENSOR_PIN);
     fireDetected = (digitalRead(FIRE_SENSOR_PIN) == LOW);
     pirState = digitalRead(PIR_PIN);
-    // Button simulation: hold button => light = 1, release => light = 0.
-    // Wiring: button between GPIO4 and GND with INPUT_PULLUP.
-    lightState = (digitalRead(LIGHT_BUTTON_PIN) == LOW);
+    lightState = digitalRead(LIGHT_SENSOR_PIN);
     distanceCm = getDistance();
     if (pirState) pirLastActive = millis();
 
     digitalWrite(LED_PIR_PIN, (millis() - pirLastActive < PIR_ON_TIME) ? HIGH : LOW);
+
     vTaskDelay(SENSOR_INTERVAL / portTICK_PERIOD_MS);
   }
 }
 
-/* EMERGENCY TASK */
+/* EMERGENCY TASK (GIỮ NGUYÊN TỪ CODE CŨ) */
 void emergencyTask(void *pv) {
+  Serial.println("Emergency Task");
   for (;;) {
-    bool currentEmergency = (fireDetected || gasValue > 1000);
-
-    if (currentEmergency && !emergencyMode) {
+    if ((fireDetected || gasValue > 1000) && !emergencyMode) {
       emergencyMode = true;
       blockAppControl = true;
-
       windowOpen = true;
-      curtainClosed = true;
-
+      
       portENTER_CRITICAL(&garaStateMux);
       garageOpen = true;
       portEXIT_CRITICAL(&garaStateMux);
-
+      
+      curtainClosed = true;
       tone(BUZZER_PIN, 3000);
-      Serial.println("!!! EMERGENCY MODE: ACTIVE !!!");
     }
 
-    else if (!currentEmergency && emergencyMode) {
+    if (emergencyMode && !fireDetected && gasValue <= 1000) {
       emergencyMode = false;
       blockAppControl = false;
-
       windowOpen = false;
-      curtainClosed = false;
-
+      
       portENTER_CRITICAL(&garaStateMux);
       garageOpen = false;
       portEXIT_CRITICAL(&garaStateMux);
-
+      
+      curtainClosed = false;
       noTone(BUZZER_PIN);
-      Serial.println("--- EMERGENCY MODE: CLEARED ---");
     }
-
     vTaskDelay(EMERGENCY_INTERVAL / portTICK_PERIOD_MS);
   }
 }
 
-/* SERVO TASK */
+/* SERVO TASK - FIX JITTER & POWER CONSUMPTION (CẬP NHẬT THÊM DOOR SERVO) */
 void servoTask(void *pv) {
+  Serial.println("Servo Task");
   TickType_t lastWake = xTaskGetTickCount();
-
-  int lastWindowAngle = -1, lastGarageAngle = -1, lastCurtainAngle = -1, lastDoorAngle = -1;
-  bool lastBuzzerState = false;
+  
+  int lastWindowAngle = -1;
+  int lastGarageAngle = -1;
+  int lastCurtainAngle = -1;
+  int lastDoorAngle = -1; // THÊM MỚI
 
   for (;;) {
     bool garage;
@@ -375,90 +448,141 @@ void servoTask(void *pv) {
       if (confirmedLightState != lightState && !emergencyMode && autoCurtainEnabled) {
         confirmedLightState = lightState;
         curtainClosed = confirmedLightState;
-        Serial.printf("[AUTO CURTAIN] light=%d => curtainClosed=%d\n", confirmedLightState, curtainClosed);
       }
     }
 
     int newWindowAngle = windowOpen ? 90 : 0;
     int newGarageAngle = garage ? 180 : 0;
-    int newCurtainAngle = curtainClosed ? 180 : 0;
-    int newDoorAngle = doorOpen ? 90 : 0;
+    int newCurtainAngle = curtainClosed ? 0 : 180;
+    int newDoorAngle = doorOpen ? 180 : 0; // THÊM MỚI
+    
+    if (newWindowAngle != lastWindowAngle) {
+      windowServo.write(newWindowAngle);
+      lastWindowAngle = newWindowAngle;
+    }
+    
+    if (newGarageAngle != lastGarageAngle) {
+      garageServo.write(newGarageAngle);
+      lastGarageAngle = newGarageAngle;
+    }
+    
+    if (newCurtainAngle != lastCurtainAngle) {
+      curtainServo.write(newCurtainAngle);
+      lastCurtainAngle = newCurtainAngle;
+    }
 
-    if (newWindowAngle != lastWindowAngle) { windowServo.write(newWindowAngle); lastWindowAngle = newWindowAngle; }
-    if (newGarageAngle != lastGarageAngle) { garageServo.write(newGarageAngle); lastGarageAngle = newGarageAngle; }
-    if (newCurtainAngle != lastCurtainAngle) { curtainServo.write(newCurtainAngle); lastCurtainAngle = newCurtainAngle; }
-    if (newDoorAngle != lastDoorAngle) { doorServo.write(newDoorAngle); lastDoorAngle = newDoorAngle; }
+    // THÊM MỚI
+    if (newDoorAngle != lastDoorAngle) {
+      doorServo.write(newDoorAngle);
+      lastDoorAngle = newDoorAngle;
+    }
 
     if (!emergencyMode) {
-      bool shouldBuzzer = (distanceCm < 5);
-      if (shouldBuzzer != lastBuzzerState) {
-        if (shouldBuzzer) tone(BUZZER_PIN, 2000);
-        else noTone(BUZZER_PIN);
-        lastBuzzerState = shouldBuzzer;
-      }
+      if (distanceCm < 5) tone(BUZZER_PIN, 2000);
+      else noTone(BUZZER_PIN);
     }
+
     vTaskDelayUntil(&lastWake, SERVO_INTERVAL / portTICK_PERIOD_MS);
   }
 }
 
-/* TELEMETRY TASK */
+/* TELEMETRY TASK (GIỮ NGUYÊN TỪ CODE CŨ) */
 void telemetryTask(void *pv) {
+  Serial.println("Telemetry Task");
   for (;;) {
     if (client.connected()) sendTelemetry();
     vTaskDelay(TELEMETRY_INTERVAL / portTICK_PERIOD_MS);
   }
 }
 
-/* SETUP */
-void setupI2C() {
-  Wire.begin(KEYPAD_I2C_SDA, KEYPAD_I2C_SCL);
-  Wire.setClock(I2C_CLOCK);
-  customKeypad.begin();
+/* THÊM MỚI: TASK MÀN HÌNH & BÀN PHÍM (Đã chuyển sang Core 1) */
+void lcdKeypadTask(void *pv) {
+  showHomePrompt();
+    for (;;) {
+    char key = readKeypadKey();
 
-  Wire1.begin(LCD_I2C_SDA, LCD_I2C_SCL);
-  Wire1.setClock(I2C_CLOCK);
-  lcd.init();
-  lcd.backlight();
+        if (key) {
+            if (key == '*') {
+        inputPassword = "";
+        showHomePrompt();
+      } else if (key == 'A') {
+        changePasswordFlow();
+        inputPassword = "";
+    showHomePrompt();
+            } else if (key == '#') {
+        if (inputPassword == currentPassword) {
+                    updateLCD("Dung Pass!", "Mo Cua Chinh...");
+                    portENTER_CRITICAL(&doorStateMux); doorOpen = true; portEXIT_CRITICAL(&doorStateMux);
+                    vTaskDelay(5000 / portTICK_PERIOD_MS);
+                    updateLCD("Dong Cua...", "");
+                    portENTER_CRITICAL(&doorStateMux); doorOpen = false; portEXIT_CRITICAL(&doorStateMux);
+                } else {
+                    updateLCD("Sai Pass!", "Thu lai...");
+                    tone(BUZZER_PIN, 500, 500); // Tương thích với hàm tone của bạn
+                }
+        inputPassword = "";
+                vTaskDelay(1000 / portTICK_PERIOD_MS);
+        showHomePrompt();
+      } else if (key >= '0' && key <= '9') {
+        if (inputPassword.length() < PASS_LEN) {
+          inputPassword += key;
+        }
+        String masked = toMaskedText(inputPassword.length());
+                updateLCD("Nhap Pass:", masked);
+            }
+        }
+        vTaskDelay(100 / portTICK_PERIOD_MS);
+    }
 }
 
+/* SETUP */
 void setup() {
   Serial.begin(115200);
+  delay(2000);
+  Serial.println("Boot ok");
 
-  lcdMutex = xSemaphoreCreateMutex();
-  keypadMutex = xSemaphoreCreateMutex();
+  // KHỞI TẠO I2C
+  i2cMutex = xSemaphoreCreateMutex();
+  Wire.begin(I2C_SDA, I2C_SCL);
+  Wire.setClock(100000); // Ổn định I2C
+  lcd.init(); lcd.backlight();
+  customKeypad.begin();
 
-  if (lcdMutex == NULL || keypadMutex == NULL) while (1);
+  EEPROM.begin(EEPROM_SIZE);
+  loadPasswordFromEEPROM();
 
-  for (int i = 0; i < 4; i++) pinMode(LED_PINS[i], OUTPUT);
+  for (int i = 0; i < 4; i++) {
+    pinMode(LED_PINS[i], OUTPUT);
+  }
 
   pinMode(TRIG_PIN, OUTPUT);
   pinMode(ECHO_PIN, INPUT);
   pinMode(BUZZER_PIN, OUTPUT);
   pinMode(PIR_PIN, INPUT);
   pinMode(LED_PIR_PIN, OUTPUT);
-
-  pinMode(FIRE_SENSOR_PIN, INPUT_PULLUP);
-  pinMode(LIGHT_BUTTON_PIN, INPUT_PULLUP);
-
-  setupI2C();
+  pinMode(FIRE_SENSOR_PIN, INPUT);
+  pinMode(LIGHT_SENSOR_PIN, INPUT);
 
   ESP32PWM::allocateTimer(0);
   ESP32PWM::allocateTimer(1);
   ESP32PWM::allocateTimer(2);
-  ESP32PWM::allocateTimer(3);
+  ESP32PWM::allocateTimer(3); // Cần thêm 1 timer cho Servo thứ 4
 
   windowServo.attach(WINDOW_SERVO_PIN);
   garageServo.attach(GARAGE_SERVO_PIN);
   curtainServo.attach(CURTAIN_SERVO_PIN);
-  doorServo.attach(DOOR_SERVO_PIN);
+  doorServo.attach(DOOR_SERVO_PIN); // Khởi tạo Servo cửa
 
   xTaskCreatePinnedToCore(wifiTask, "wifi", 6000, NULL, 3, NULL, 0);
   xTaskCreatePinnedToCore(mqttTask, "mqtt", 6000, NULL, 3, NULL, 0);
   xTaskCreatePinnedToCore(telemetryTask, "telemetry", 6000, NULL, 1, NULL, 0);
+
   xTaskCreatePinnedToCore(sensorTask, "sensor", 6000, NULL, 3, NULL, 1);
   xTaskCreatePinnedToCore(emergencyTask, "emergency", 6000, NULL, 4, NULL, 1);
   xTaskCreatePinnedToCore(servoTask, "servo", 6000, NULL, 3, NULL, 1);
-  xTaskCreatePinnedToCore(lcdKeypadTask, "lcd_kp", 4096, NULL, 2, NULL, 0);
+  xTaskCreatePinnedToCore(lcdKeypadTask, "lcd_kp", 4096, NULL, 2, NULL, 1); // Đã chuyển sang Core 1
+
+  Serial.println("SYSTEM STARTED");
 }
 
 void loop() {
