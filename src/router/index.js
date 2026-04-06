@@ -16,11 +16,6 @@ const router = createRouter({
       name: 'login',
       component: login
     },
-<<<<<<< HEAD
-
-=======
-    
->>>>>>> origin/main
   ],
 })
 router.beforeEach((to, from, next) => {
