@@ -96,7 +96,69 @@
           </div>
         </div>
       </div>
-    </main>
+
+      <div class="bg-white rounded-2xl shadow-md p-6 mb-6">
+        <div class="flex items-center justify-between mb-4">
+          <h2 class="text-lg font-bold text-gray-800 flex items-center gap-2 uppercase tracking-wide text-sm">
+            <i class="mdi mdi-plus-circle text-green-500 text-xl"></i> Thêm người dùng
+          </h2>
+        </div>
+        <div class="flex gap-3 items-end mb-6">
+          <div class="flex-1">
+            <label class="block text-sm font-semibold text-gray-700 mb-2">Tên người muốn thêm</label>
+            <input
+              v-model="registrationName"
+              type="text"
+              placeholder="Nhập tên người dùng..."
+              class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            />
+          </div>
+          <button
+            @click="registerUser"
+            class="px-6 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 active:scale-95 transition-all font-semibold flex items-center gap-2"
+          >
+            <i class="mdi mdi-account-plus"></i> Thêm
+          </button>
+        </div>
+      </div>
+
+      <div class="bg-white rounded-2xl shadow-md p-6 mb-6">
+        <div class="flex items-center justify-between mb-4">
+          <h2 class="text-lg font-bold text-gray-800 flex items-center gap-2 uppercase tracking-wide text-sm">
+            <i class="mdi mdi-history text-blue-500 text-xl"></i> Lịch sử nhận diện mở cửa
+          </h2>
+          <button @click="fetchAndDisplayHistory" class="text-sm text-blue-500 hover:text-blue-700 flex items-center gap-1">
+            <i class="mdi mdi-refresh"></i> Làm mới
+          </button>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full text-left border-collapse">
+            <thead>
+              <tr class="bg-gray-50 text-gray-500 text-xs uppercase tracking-wider">
+                <th class="p-3 rounded-tl-lg rounded-bl-lg w-1/3">Thời gian</th>
+                <th class="p-3 rounded-tr-lg rounded-br-lg">Người mở cửa</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-if="doorHistory.length === 0">
+                <td colspan="2" class="p-4 text-center text-gray-400">Chưa có dữ liệu</td>
+              </tr>
+              <tr v-for="log in doorHistory" :key="log.id" class="border-b border-gray-100 last:border-0 hover:bg-gray-50 transition">
+                <td class="p-3 text-sm text-gray-600 font-medium">
+                  <i class="mdi mdi-clock-outline mr-1 text-gray-400"></i> {{ log.timeString }}
+                </td>
+                <td class="p-3">
+                  <span class="px-3 py-1 rounded-full text-xs font-bold" :class="log.name === 'Unknown' ? 'bg-red-100 text-red-600' : 'bg-green-100 text-green-600'">
+                    <i class="mdi" :class="log.name === 'Unknown' ? 'mdi-account-alert' : 'mdi-account-check'"></i> {{ log.name }}
+                  </span>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+      </main>
+
     <div v-if="emergency" class="bg-red-500 w-full rounded-2xl">
       <p class="text-2xl font-bold text-gray-800 uppercase px-4 pt-4">
         {{ isFireDetected ? (isGasOver ? 'CÓ CHÁY & RÒ RỈ GAS!' : 'ĐANG XẢY RA CHÁY!') : 'PHÁT HIỆN RÒ RỈ GAS!' }}
@@ -171,7 +233,8 @@ import VoiceAssistantModule from '../components/VoiceAssistantModule.vue'
 import { Haptics } from '@capacitor/haptics'
 import { LocalNotifications } from '@capacitor/local-notifications'
 import { Capacitor } from '@capacitor/core'
-import { sendRpcCommand, updateRealtime, logout } from '../api/api'
+// BỔ SUNG: Import hàm getDoorHistory
+import { sendRpcCommand, updateRealtime, logout, getDoorHistory } from '../api/api'
 
 // --- 1. STATE MANAGEMENT ---
 const router = useRouter()
@@ -189,14 +252,18 @@ const isAutoCurtainUpdating = ref(false)
 let cardsLoading = ref([])
 let socket = null
 
-const telemetry = reactive({ gas: 0, light: 0 })
+const registrationName = ref('')
 
-// CẬP NHẬT: Thêm 'Door' vào object quản lý switch
+const telemetry = reactive({ gas: 0, light: 0})
+
+// Biến lưu trữ lịch sử
+const doorHistory = ref([])
+
 const switches = reactive({
   'Window': false,
   'Garage': false,
   'Curtain': false,
-  'Door': false // <--- THÊM MỚI
+  'Door': false
 })
 
 const leds = reactive([
@@ -227,15 +294,57 @@ if (alarmAudio) alarmAudio.loop = true
 
 // --- 2. HELPER FUNCTIONS ---
 
-// CẬP NHẬT: Thêm Icon cho Door và logic thay đổi Icon theo trạng thái đóng/mở
 const getIcon = (key, val) => {
   const map = {
     'Window': val ? 'mdi-window-open-variant' : 'mdi-window-closed-variant',
     'Curtain': val ? 'mdi-curtains' : 'mdi-curtains-closed',
     'Garage': val ? 'mdi-garage-open-variant' : 'mdi-garage-variant',
-    'Door': val ? 'mdi-door-open' : 'mdi-door-closed' // <--- THÊM MỚI ICON CỬA
+    'Door': val ? 'mdi-door-open' : 'mdi-door-closed'
   }
   return map[key] || 'mdi-power-plug'
+}
+
+const registerUser = async () => {
+  if (!registrationName.value.trim()) {
+    alert('Vui lòng nhập tên người dùng!')
+    return
+  }
+
+  try {
+    const url = `http://192.168.0.101:5001/register?name=${encodeURIComponent(registrationName.value)}`
+    const response = await fetch(url)
+
+    if (response.ok) {
+      alert(`✅ Đã thêm người dùng: ${registrationName.value}`)
+      registrationName.value = ''
+    } else {
+      alert(`❌ Lỗi: ${response.statusText}`)
+    }
+  } catch (error) {
+    console.error('Lỗi khi đăng ký người dùng:', error)
+    alert('❌ Lỗi kết nối. Vui lòng kiểm tra IP và cổng!')
+  }
+}
+
+// BỔ SUNG: Hàm tải và xử lý lịch sử
+const fetchAndDisplayHistory = async () => {
+  try {
+    const historyData = await getDoorHistory(20); // Lấy 20 lượt mở cửa gần nhất
+    const formattedLogs = [];
+
+    if (historyData.person_name) {
+      historyData.person_name.forEach((item, index) => {
+        formattedLogs.push({
+          id: item.ts,
+          name: item.value,
+          timeString: historyData.open_time ? historyData.open_time[index]?.value : new Date(item.ts).toLocaleString('vi-VN')
+        });
+      });
+    }
+    doorHistory.value = formattedLogs;
+  } catch (error) {
+    console.error("Lỗi khi tải lịch sử:", error);
+  }
 }
 
 const sendPushover = async (message) => {
@@ -323,6 +432,9 @@ watch(emergency, async (isEmergency) => {
 onMounted(() => {
   if ("Notification" in window) Notification.requestPermission()
 
+  // Tải lịch sử ngay khi mở trang
+  fetchAndDisplayHistory()
+
   socket = updateRealtime((data) => {
     isConnected.value = true
     if (data.gas) {
@@ -344,6 +456,11 @@ onMounted(() => {
     if (data.led2) leds[1].value = toTBBoolean(data.led2)
     if (data.led3) leds[2].value = toTBBoolean(data.led3)
     if (data.led4) leds[3].value = toTBBoolean(data.led4)
+
+    // BỔ SUNG: Nếu có nhận được dữ liệu person_name mới qua WebSocket -> Cập nhật lại bảng
+    if (data.person_name || data.open_time) {
+      fetchAndDisplayHistory()
+    }
   })
 })
 
