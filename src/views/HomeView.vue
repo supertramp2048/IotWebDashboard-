@@ -125,6 +125,31 @@
       <div class="bg-white rounded-2xl shadow-md p-6 mb-6">
         <div class="flex items-center justify-between mb-4">
           <h2 class="text-lg font-bold text-gray-800 flex items-center gap-2 uppercase tracking-wide text-sm">
+            <i class="mdi mdi-trash-can text-red-500 text-xl"></i> Xóa người dùng
+          </h2>
+        </div>
+        <div class="flex gap-3 items-end mb-6">
+          <div class="flex-1">
+            <label class="block text-sm font-semibold text-gray-700 mb-2">Tên người muốn xóa</label>
+            <input
+              v-model="deletionName"
+              type="text"
+              placeholder="Nhập tên người dùng muốn xóa..."
+              class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent"
+            />
+          </div>
+          <button
+            @click="deleteUser"
+            class="px-6 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 active:scale-95 transition-all font-semibold flex items-center gap-2"
+          >
+            <i class="mdi mdi-trash-can"></i> Xóa
+          </button>
+        </div>
+      </div>
+
+      <div class="bg-white rounded-2xl shadow-md p-6 mb-6">
+        <div class="flex items-center justify-between mb-4">
+          <h2 class="text-lg font-bold text-gray-800 flex items-center gap-2 uppercase tracking-wide text-sm">
             <i class="mdi mdi-history text-blue-500 text-xl"></i> Lịch sử nhận diện mở cửa
           </h2>
           <button @click="fetchAndDisplayHistory" class="text-sm text-blue-500 hover:text-blue-700 flex items-center gap-1">
@@ -253,6 +278,7 @@ let cardsLoading = ref([])
 let socket = null
 
 const registrationName = ref('')
+const deletionName = ref('')
 
 const telemetry = reactive({ gas: 0, light: 0})
 
@@ -311,7 +337,8 @@ const registerUser = async () => {
   }
 
   try {
-    const url = `http://192.168.0.101:5001/register?name=${encodeURIComponent(registrationName.value)}`
+    const ipServer = import.meta.env.VITE_IP_SERVER
+    const url = `http://${ipServer}/register?name=${encodeURIComponent(registrationName.value)}`
     const response = await fetch(url)
 
     if (response.ok) {
@@ -323,6 +350,35 @@ const registerUser = async () => {
   } catch (error) {
     console.error('Lỗi khi đăng ký người dùng:', error)
     alert('❌ Lỗi kết nối. Vui lòng kiểm tra IP và cổng!')
+  }
+}
+
+const deleteUser = async () => {
+  if (!deletionName.value.trim()) {
+    alert('Vui lòng nhập tên người dùng muốn xóa!')
+    return
+  }
+
+  try {
+    const response = await fetch('http://localhost:5001/delete', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        name: deletionName.value
+      })
+    })
+
+    if (response.ok) {
+      alert(`✅ Đã xóa người dùng: ${deletionName.value}`)
+      deletionName.value = ''
+    } else {
+      alert(`❌ Lỗi: ${response.statusText}`)
+    }
+  } catch (error) {
+    console.error('Lỗi khi xóa người dùng:', error)
+    alert('❌ Lỗi kết nối. Vui lòng kiểm tra server!')
   }
 }
 
