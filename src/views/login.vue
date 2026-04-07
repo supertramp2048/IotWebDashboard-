@@ -60,6 +60,8 @@
       try {
         loading.value = true
         const res = await login(username.value,password.value)
+        console.log(res);
+        
         if(res != null){
           router.push('/')
         }

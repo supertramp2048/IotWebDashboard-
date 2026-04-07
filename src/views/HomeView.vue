@@ -115,9 +115,10 @@
           </div>
           <button
             @click="registerUser"
-            class="px-6 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 active:scale-95 transition-all font-semibold flex items-center gap-2"
+            :disabled="isRegisteringUser || !registrationName.trim()"
+            class="px-6 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 active:scale-95 transition-all font-semibold flex items-center gap-2 disabled:bg-green-300 disabled:cursor-not-allowed"
           >
-            <i class="mdi mdi-account-plus"></i> Thêm
+            <i class="mdi" :class="isRegisteringUser ? 'mdi-loading mdi-spin' : 'mdi-account-plus'"></i> {{ isRegisteringUser ? 'Đang thêm...' : 'Thêm' }}
           </button>
         </div>
       </div>
@@ -130,21 +131,32 @@
         </div>
         <div class="flex gap-3 items-end mb-6">
           <div class="flex-1">
-            <label class="block text-sm font-semibold text-gray-700 mb-2">Tên người muốn xóa</label>
-            <input
+            <label class="block text-sm font-semibold text-gray-700 mb-2">Chọn người dùng muốn xóa</label>
+            <select
               v-model="deletionName"
-              type="text"
-              placeholder="Nhập tên người dùng muốn xóa..."
-              class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent"
-            />
+              :disabled="isLoadingUsers"
+              class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent disabled:bg-gray-100 disabled:cursor-not-allowed"
+            >
+              <option value="">{{ isLoadingUsers ? 'Đang tải...' : 'Chọn tên người dùng' }}</option>
+              <option v-for="user in userList" :key="user" :value="user">
+                {{ user }}
+              </option>
+            </select>
           </div>
           <button
             @click="deleteUser"
-            class="px-6 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 active:scale-95 transition-all font-semibold flex items-center gap-2"
+            class="px-6 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 active:scale-95 transition-all font-semibold flex items-center gap-2 disabled:bg-red-300 disabled:cursor-not-allowed"
+            :disabled="isLoadingUsers || !deletionName || isDeletingUser"
           >
-            <i class="mdi mdi-trash-can"></i> Xóa
+            <i class="mdi" :class="isDeletingUser ? 'mdi-loading mdi-spin' : 'mdi-trash-can'"></i> {{ isDeletingUser ? 'Đang xóa...' : 'Xóa' }}
           </button>
         </div>
+        <button
+          @click="fetchUserList"
+          class="text-sm text-gray-500 hover:text-gray-700 flex items-center gap-1 mt-2"
+        >
+          <i class="mdi mdi-refresh"></i> Tải lại danh sách
+        </button>
       </div>
 
       <div class="bg-white rounded-2xl shadow-md p-6 mb-6">
@@ -183,6 +195,70 @@
         </div>
       </div>
       </main>
+
+    <!-- Popup xác nhận thêm người dùng -->
+    <div v-if="showRegisterConfirmDialog" class="fixed inset-0 z-[999] flex items-center justify-center bg-black/50 px-3 py-6">
+      <div class="bg-white rounded-2xl shadow-2xl p-8 max-w-md w-full border-2 border-green-200">
+        <h3 class="text-2xl font-bold text-gray-800 mb-2">Xác nhận thêm người dùng</h3>
+        <p class="text-gray-600 mb-6">Nhập <span class="font-bold text-green-600">"create"</span> để xác nhận thêm người dùng: <span class="font-semibold">{{ registrationName }}</span></p>
+        <input
+          v-model="confirmRegisterText"
+          type="text"
+          placeholder="Nhập 'create' để xác nhận..."
+          class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent mb-6"
+          @keyup.enter="confirmRegister"
+        />
+        <div class="flex gap-3 justify-end">
+          <button
+            @click="cancelRegisterConfirm"
+            :disabled="isRegisteringUser"
+            class="px-6 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-all font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            Hủy
+          </button>
+          <button
+            @click="confirmRegister"
+            :disabled="isRegisteringUser || confirmRegisterText !== 'create'"
+            class="px-6 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-all font-semibold disabled:bg-green-300 disabled:cursor-not-allowed flex items-center gap-2"
+          >
+            <i class="mdi" :class="isRegisteringUser ? 'mdi-loading mdi-spin' : 'mdi-check'"></i>
+            {{ isRegisteringUser ? 'Đang thêm...' : 'Xác nhận' }}
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Popup xác nhận xóa người dùng -->
+    <div v-if="showDeleteConfirmDialog" class="fixed inset-0 z-[999] flex items-center justify-center bg-black/50 px-3 py-6">
+      <div class="bg-white rounded-2xl shadow-2xl p-8 max-w-md w-full border-2 border-red-200">
+        <h3 class="text-2xl font-bold text-gray-800 mb-2">⚠️ Xác nhận xóa người dùng</h3>
+        <p class="text-gray-600 mb-6">Nhập <span class="font-bold text-red-600">"delete"</span> để xác nhận xóa người dùng: <span class="font-semibold">{{ deletionName }}</span></p>
+        <input
+          v-model="confirmDeleteText"
+          type="text"
+          placeholder="Nhập 'delete' để xác nhận..."
+          class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent mb-6"
+          @keyup.enter="confirmDelete"
+        />
+        <div class="flex gap-3 justify-end">
+          <button
+            @click="cancelDeleteConfirm"
+            :disabled="isDeletingUser"
+            class="px-6 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-all font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            Hủy
+          </button>
+          <button
+            @click="confirmDelete"
+            :disabled="isDeletingUser || confirmDeleteText !== 'delete'"
+            class="px-6 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-all font-semibold disabled:bg-red-300 disabled:cursor-not-allowed flex items-center gap-2"
+          >
+            <i class="mdi" :class="isDeletingUser ? 'mdi-loading mdi-spin' : 'mdi-trash-can'"></i>
+            {{ isDeletingUser ? 'Đang xóa...' : 'Xóa' }}
+          </button>
+        </div>
+      </div>
+    </div>
 
     <div v-if="emergency" class="bg-red-500 w-full rounded-2xl">
       <p class="text-2xl font-bold text-gray-800 uppercase px-4 pt-4">
@@ -251,6 +327,7 @@
 </template>
 
 <script setup>
+import axios from 'axios';
 import { ref, reactive, watch, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import ElementLoader from '../components/loader.vue'
@@ -258,9 +335,13 @@ import VoiceAssistantModule from '../components/VoiceAssistantModule.vue'
 import { Haptics } from '@capacitor/haptics'
 import { LocalNotifications } from '@capacitor/local-notifications'
 import { Capacitor } from '@capacitor/core'
-// BỔ SUNG: Import hàm getDoorHistory
-import { sendRpcCommand, updateRealtime, logout, getDoorHistory } from '../api/api'
+import { sendRpcCommand, updateRealtime, logout, getDoorHistory, getLocalUsers, registerLocalUser, deleteLocalUser } from '../api/api'
 
+// Instance dành riêng cho Server Python nhận diện khuôn mặt
+const LOCAL_API = axios.create({
+    baseURL: 'http://localhost:5001',
+    headers: { 'Content-Type': 'application/json' }
+});
 // --- 1. STATE MANAGEMENT ---
 const router = useRouter()
 const isCardLoading = ref(false)
@@ -279,6 +360,14 @@ let socket = null
 
 const registrationName = ref('')
 const deletionName = ref('')
+const userList = ref([])
+const isLoadingUsers = ref(false)
+const isRegisteringUser = ref(false)
+const isDeletingUser = ref(false)
+const showRegisterConfirmDialog = ref(false)
+const showDeleteConfirmDialog = ref(false)
+const confirmRegisterText = ref('')
+const confirmDeleteText = ref('')
 
 const telemetry = reactive({ gas: 0, light: 0})
 
@@ -336,50 +425,87 @@ const registerUser = async () => {
     return
   }
 
-  try {
-    const ipServer = import.meta.env.VITE_IP_SERVER
-    const url = `http://${ipServer}/register?name=${encodeURIComponent(registrationName.value)}`
-    const response = await fetch(url)
+  showRegisterConfirmDialog.value = true
+  confirmRegisterText.value = ''
+}
 
-    if (response.ok) {
-      alert(`✅ Đã thêm người dùng: ${registrationName.value}`)
-      registrationName.value = ''
-    } else {
-      alert(`❌ Lỗi: ${response.statusText}`)
-    }
+const confirmRegister = async () => {
+  if (confirmRegisterText.value !== 'create') {
+    alert('❌ Vui lòng nhập "create" để xác nhận!')
+    return
+  }
+
+  isRegisteringUser.value = true
+  try {
+    await registerLocalUser(registrationName.value)
+    
+    alert(`✅ Đã thêm người dùng: ${registrationName.value}`)
+    registrationName.value = ''
+    confirmRegisterText.value = ''
+    showRegisterConfirmDialog.value = false
+    fetchUserList()
   } catch (error) {
     console.error('Lỗi khi đăng ký người dùng:', error)
     alert('❌ Lỗi kết nối. Vui lòng kiểm tra IP và cổng!')
+  } finally {
+    isRegisteringUser.value = false
+  }
+}
+
+const cancelRegisterConfirm = () => {
+  showRegisterConfirmDialog.value = false
+  confirmRegisterText.value = ''
+}
+
+const fetchUserList = async () => {
+  try {
+    isLoadingUsers.value = true
+    // Gọi hàm từ api.js
+    const data = await getLocalUsers()
+    userList.value = Array.isArray(data) ? data : []
+  } catch (error) {
+    console.error('Lỗi kết nối tới server local:', error)
+  } finally {
+    isLoadingUsers.value = false
   }
 }
 
 const deleteUser = async () => {
   if (!deletionName.value.trim()) {
-    alert('Vui lòng nhập tên người dùng muốn xóa!')
+    alert('Vui lòng chọn người dùng muốn xóa!')
     return
   }
 
-  try {
-    const response = await fetch('http://localhost:5001/delete', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        name: deletionName.value
-      })
-    })
+  showDeleteConfirmDialog.value = true
+  confirmDeleteText.value = ''
+}
 
-    if (response.ok) {
-      alert(`✅ Đã xóa người dùng: ${deletionName.value}`)
-      deletionName.value = ''
-    } else {
-      alert(`❌ Lỗi: ${response.statusText}`)
-    }
+const confirmDelete = async () => {
+  if (confirmDeleteText.value !== 'delete') {
+    alert('❌ Vui lòng nhập "delete" để xác nhận!')
+    return
+  }
+
+  isDeletingUser.value = true
+  try {
+    await deleteLocalUser(deletionName.value)
+    
+    alert(`✅ Đã xóa người dùng: ${deletionName.value}`)
+    deletionName.value = ''
+    confirmDeleteText.value = ''
+    showDeleteConfirmDialog.value = false
+    fetchUserList()
   } catch (error) {
     console.error('Lỗi khi xóa người dùng:', error)
     alert('❌ Lỗi kết nối. Vui lòng kiểm tra server!')
+  } finally {
+    isDeletingUser.value = false
   }
+}
+
+const cancelDeleteConfirm = () => {
+  showDeleteConfirmDialog.value = false
+  confirmDeleteText.value = ''
 }
 
 // BỔ SUNG: Hàm tải và xử lý lịch sử
@@ -490,6 +616,9 @@ onMounted(() => {
 
   // Tải lịch sử ngay khi mở trang
   fetchAndDisplayHistory()
+  
+  // Tải danh sách người dùng
+  fetchUserList()
 
   socket = updateRealtime((data) => {
     isConnected.value = true

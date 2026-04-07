@@ -17,6 +17,19 @@ const API = axios.create({
 
 let accessToken = null;
 let refreshToken = null;
+let isRefreshing = false;
+let pendingRequests = [];
+
+const resolvePending = (error, token = null) => {
+    pendingRequests.forEach((promise) => {
+        if (error) {
+            promise.reject(error);
+        } else {
+            promise.resolve(token);
+        }
+    });
+    pendingRequests = [];
+};
 
 // 2. Request Interceptor
 API.interceptors.request.use(config => {
@@ -32,12 +45,54 @@ API.interceptors.request.use(config => {
 // 3. Response Interceptor
 API.interceptors.response.use(
     (response) => response,
-    (error) => {
-        if (error.response && error.response.status === 401) {
-            console.warn(" Token hết hạn. Đang đăng xuất...");
-            logout();
-            // window.location.reload(); // Bỏ comment nếu muốn tải lại trang
+    async (error) => {
+        const originalRequest = error.config;
+        if (error.response && error.response.status === 401 && !originalRequest?._retry) {
+            originalRequest._retry = true;
+
+            const storedRefreshToken = refreshToken || localStorage.getItem('tb_refreshToken');
+            if (!storedRefreshToken) {
+                console.warn("Token hết hạn và không có refresh token. Đang đăng xuất...");
+                logout();
+                return Promise.reject(error);
+            }
+
+            if (isRefreshing) {
+                return new Promise((resolve, reject) => {
+                    pendingRequests.push({ resolve, reject });
+                }).then((token) => {
+                    originalRequest.headers['X-Authorization'] = `Bearer ${token}`;
+                    return API(originalRequest);
+                });
+            }
+
+            isRefreshing = true;
+
+            try {
+                const refreshRes = await API.post('/api/auth/token', {
+                    refreshToken: storedRefreshToken
+                });
+
+                accessToken = refreshRes.data.token;
+                refreshToken = refreshRes.data.refreshToken;
+
+                localStorage.setItem('tb_token', accessToken);
+                localStorage.setItem('tb_refreshToken', refreshToken);
+
+                resolvePending(null, accessToken);
+
+                originalRequest.headers['X-Authorization'] = `Bearer ${accessToken}`;
+                return API(originalRequest);
+            } catch (refreshError) {
+                resolvePending(refreshError, null);
+                console.warn("Refresh token thất bại. Đang đăng xuất...");
+                logout();
+                return Promise.reject(refreshError);
+            } finally {
+                isRefreshing = false;
+            }
         }
+
         return Promise.reject(error);
     }
 );
@@ -198,4 +253,44 @@ export async function getDoorHistory(limit = 50) {
         console.error("Lỗi lấy lịch sử:", error);
         throw error;
     }
+}
+// ==========================================
+// API GỌI ĐẾN SERVER PYTHON (NHẬN DIỆN KHUÔN MẶT)
+// ==========================================
+
+const localServerIp = import.meta.env.VITE_IP_SERVER || 'localhost:5001';
+
+const LOCAL_API = axios.create({
+    baseURL: `http://${localServerIp}`,
+    headers: {
+        'Content-Type': 'application/json'
+    }
+});
+LOCAL_API.interceptors.request.use(config => {
+    // Lấy token đang đăng nhập (hoặc dùng biến token riêng nếu Python dùng hệ thống token khác)
+    const token = localStorage.getItem('tb_token'); 
+    if (token) {
+        // Lưu ý: Sửa 'Authorization' thành 'X-Authorization' nếu code Flask của bạn đang check key này
+        config.headers['Authorization'] = `Bearer ${token}`; 
+    }
+    return config;
+}, error => {
+    return Promise.reject(error);
+});
+// Lấy danh sách người dùng
+export async function getLocalUsers() {
+    const res = await LOCAL_API.get('/list');
+    return res.data;
+}
+
+// Đăng ký người dùng mới
+export async function registerLocalUser(name) {
+    const res = await LOCAL_API.get(`/register?name=${encodeURIComponent(name)}`);
+    return res.data;
+}
+
+// Xóa người dùng
+export async function deleteLocalUser(name) {
+    const res = await LOCAL_API.post('/delete', { name });
+    return res.data;
 }
