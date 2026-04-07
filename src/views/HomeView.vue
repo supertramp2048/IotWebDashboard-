@@ -274,10 +274,10 @@ const leds = reactive([
 ])
 
 const VOICE_DEVICE_MAP = Object.freeze({
-  den_phong_khach: { type: 'led', rpcLedNumber: 1, uiIndex: 2 },
-  den_phong_ngu: { type: 'led', rpcLedNumber: 2, uiIndex: 3 },
-  den_phong_bep: { type: 'led', rpcLedNumber: 3, uiIndex: 1 },
-  den_gara: { type: 'led', rpcLedNumber: 4, uiIndex: 0 },
+  den_gara: { type: 'led', rpcLedNumber: 3, uiIndex: 2 },
+  den_phong_bep: { type: 'led', rpcLedNumber: 2, uiIndex: 1 },
+  den_phong_khach: { type: 'led', rpcLedNumber: 1, uiIndex: 0 },
+  den_phong_ngu: { type: 'led', rpcLedNumber: 4, uiIndex: 3 },
   cua_chinh: { type: 'switch', switchKey: 'Door' },
   cua_so: { type: 'switch', switchKey: 'Window' },
   rem_cua: { type: 'switch', switchKey: 'Curtain' },

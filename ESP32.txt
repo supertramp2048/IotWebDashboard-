@@ -6,12 +6,16 @@
 #include <LiquidCrystal_I2C.h>
 #include <I2CKeyPad.h> 
 #include <EEPROM.h>
+#include <HTTPClient.h>
 
 /* WIFI + THINGSBOARD */
-#define WIFI_SSID      "Luc Ma 2002"
-#define WIFI_PASSWORD  "lm2002175"
+#define WIFI_SSID      "Remike"
+#define WIFI_PASSWORD  "Longkepro"
 #define TB_SERVER "demo.thingsboard.io"
 #define TB_TOKEN "hC7AZY9sXtoWcDoW8UtV"
+
+/* AI SERVER CONFIG */
+const String serverUrl = "http://192.168.0.101:5001/trigger_stream";
 
 /* PINS */
 const int LED_PINS[4] = { 14, 25, 26, 27 };
@@ -90,6 +94,9 @@ portMUX_TYPE mux = portMUX_INITIALIZER_UNLOCKED;
 portMUX_TYPE garaStateMux = portMUX_INITIALIZER_UNLOCKED;
 portMUX_TYPE doorStateMux = portMUX_INITIALIZER_UNLOCKED; // THÊM MỚI
 SemaphoreHandle_t i2cMutex; // THÊM MỚI
+TaskHandle_t aiTaskHandle = NULL;
+
+void sendTelemetry();
 
 /* DISTANCE - WATCHDOG SAFE FIX (GIỮ NGUYÊN TỪ CODE CŨ) */
 float getDistance() {
@@ -119,7 +126,7 @@ void updateLCD(String line1, String line2) {
 }
 
 void showHomePrompt() {
-  updateLCD("He thong SS", "A:DoiMK NhapMK");
+  updateLCD("He thong SS", "A:DoiMK B:Face");
 }
 
 String toMaskedText(size_t len) {
@@ -238,6 +245,26 @@ void changePasswordFlow() {
   vTaskDelay(180 / portTICK_PERIOD_MS);
   tone(BUZZER_PIN, 1600, 120);
   vTaskDelay(1000 / portTICK_PERIOD_MS);
+}
+
+void setDoorState(bool openState) {
+  portENTER_CRITICAL(&doorStateMux);
+  doorOpen = openState;
+  portEXIT_CRITICAL(&doorStateMux);
+  sendTelemetry();
+}
+
+void grantDoorAccess(const String &headline) {
+  updateLCD(headline, "Mo Cua Chinh...");
+  setDoorState(true);
+
+  vTaskDelay(5000 / portTICK_PERIOD_MS);
+
+  updateLCD("Dong Cua...", "");
+  setDoorState(false);
+
+  vTaskDelay(1000 / portTICK_PERIOD_MS);
+  showHomePrompt();
 }
 
 /* TELEMETRY */
@@ -495,6 +522,44 @@ void telemetryTask(void *pv) {
   }
 }
 
+/* TASK AI QUET KHUON MAT */
+void aiTask(void *pvParameters) {
+  for (;;) {
+    ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+
+    if (WiFi.status() != WL_CONNECTED) {
+      updateLCD("Loi mang WiFi!", "");
+      vTaskDelay(2000 / portTICK_PERIOD_MS);
+      showHomePrompt();
+      continue;
+    }
+
+    HTTPClient http;
+    http.setTimeout(15000);
+    http.begin(serverUrl);
+    int httpCode = http.GET();
+
+    if (httpCode > 0) {
+      String response = http.getString();
+      response.trim();
+
+      if (response == "SUCCESS") {
+        grantDoorAccess("Nhan dien DUNG!");
+      } else {
+        updateLCD("Nhan dien SAI!", "");
+        vTaskDelay(2000 / portTICK_PERIOD_MS);
+        showHomePrompt();
+      }
+    } else {
+      updateLCD("Loi AI Server!", "Thu lai sau...");
+      vTaskDelay(2000 / portTICK_PERIOD_MS);
+      showHomePrompt();
+    }
+
+    http.end();
+  }
+}
+
 /* THÊM MỚI: TASK MÀN HÌNH & BÀN PHÍM (Đã chuyển sang Core 1) */
 void lcdKeypadTask(void *pv) {
   showHomePrompt();
@@ -509,13 +574,15 @@ void lcdKeypadTask(void *pv) {
         changePasswordFlow();
         inputPassword = "";
     showHomePrompt();
+      } else if (key == 'B') {
+        inputPassword = "";
+        updateLCD("Dang quet mat...", "Cho xac nhan...");
+        if (aiTaskHandle != NULL) {
+          xTaskNotifyGive(aiTaskHandle);
+        }
             } else if (key == '#') {
         if (inputPassword == currentPassword) {
-                    updateLCD("Dung Pass!", "Mo Cua Chinh...");
-                    portENTER_CRITICAL(&doorStateMux); doorOpen = true; portEXIT_CRITICAL(&doorStateMux);
-                    vTaskDelay(5000 / portTICK_PERIOD_MS);
-                    updateLCD("Dong Cua...", "");
-                    portENTER_CRITICAL(&doorStateMux); doorOpen = false; portEXIT_CRITICAL(&doorStateMux);
+                    grantDoorAccess("Dung Pass!");
                 } else {
                     updateLCD("Sai Pass!", "Thu lai...");
                     tone(BUZZER_PIN, 500, 500); // Tương thích với hàm tone của bạn
@@ -580,6 +647,7 @@ void setup() {
   xTaskCreatePinnedToCore(sensorTask, "sensor", 6000, NULL, 3, NULL, 1);
   xTaskCreatePinnedToCore(emergencyTask, "emergency", 6000, NULL, 4, NULL, 1);
   xTaskCreatePinnedToCore(servoTask, "servo", 6000, NULL, 3, NULL, 1);
+  xTaskCreatePinnedToCore(aiTask, "aiTask", 8192, NULL, 1, &aiTaskHandle, 1);
   xTaskCreatePinnedToCore(lcdKeypadTask, "lcd_kp", 4096, NULL, 2, NULL, 1); // Đã chuyển sang Core 1
 
   Serial.println("SYSTEM STARTED");

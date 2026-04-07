@@ -134,11 +134,8 @@ export function updateRealtime(onData) {
                 entityId: deviceId,
                 scope: "LATEST_TELEMETRY",
                 cmdId: 10,
-<<<<<<< HEAD
-                keys: "window,garage,curtain,door,autoCurtain,emergency,gas,fire,light"
-=======
-                keys: "window,garage,curtain,emergency,gas,fire,door,person_name,open_time"
->>>>>>> origin/main
+                keys: "window,garage,curtain,door,autoCurtain,emergency,gas,fire,light,person_name,open_time"
+                //keys: "window,garage,curtain,emergency,gas,fire,door,person_name,open_time"
             }],
             // 2. Lắng nghe Attributes (Trạng thái công tắc)
             attrSubCmds: [
@@ -183,25 +180,22 @@ export function updateRealtime(onData) {
     ws.onclose = () => console.warn("WebSocket closed");
     return ws;
 }
-<<<<<<< HEAD
-=======
 
 export async function getDoorHistory(limit = 50) {
     if (!deviceId) return console.error("Thiếu Device ID");
 
     const endTs = Date.now();
-    const startTs = endTs - (7 * 24 * 60 * 60 * 1000); 
+    const startTs = endTs - (7 * 24 * 60 * 60 * 1000);
 
     const keys = "door,person_name,open_time";
     const params = `?keys=${keys}&startTs=${startTs}&endTs=${endTs}&limit=${limit}`;
-    
+
     try {
         // SỬA: Thêm DEVICE/ vào trước ${deviceId}
         const res = await API.get(`/api/plugins/telemetry/DEVICE/${deviceId}/values/timeseries${params}`);
-        return res.data; 
+        return res.data;
     } catch (error) {
         console.error("Lỗi lấy lịch sử:", error);
         throw error;
     }
 }
->>>>>>> origin/main

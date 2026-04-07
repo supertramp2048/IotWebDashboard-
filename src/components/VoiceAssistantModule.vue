@@ -23,6 +23,34 @@ const speechRecognitionCtor =
     : null
 
 const isSpeechSupported = computed(() => Boolean(speechRecognitionCtor))
+const isSpeechSynthesisSupported = computed(
+  () => typeof window !== 'undefined' && 'speechSynthesis' in window && typeof SpeechSynthesisUtterance !== 'undefined'
+)
+
+function speakText(text) {
+  if (!isSpeechSynthesisSupported.value) {
+    return
+  }
+
+  const content = String(text || '').trim()
+  if (!content) {
+    return
+  }
+
+  const utterance = new SpeechSynthesisUtterance(content)
+  utterance.lang = 'vi-VN'
+  utterance.rate = 1
+  utterance.pitch = 1
+
+  const voices = window.speechSynthesis.getVoices()
+  const vietnameseVoice = voices.find((voice) => voice?.lang?.toLowerCase().startsWith('vi'))
+  if (vietnameseVoice) {
+    utterance.voice = vietnameseVoice
+  }
+
+  window.speechSynthesis.cancel()
+  window.speechSynthesis.speak(utterance)
+}
 
 function clearListeningTimeout() {
   if (listeningTimeoutId) {
@@ -164,6 +192,7 @@ Lệnh thoại người dùng: "${sentence}"`
 
     // Sau khi xu ly xong, thay van ban nhan duoc bang message tu Gemini.
     viewText.value = parsed?.message ? String(parsed.message) : 'Khong co message trong ket qua.'
+    speakText(viewText.value)
   } catch (error) {
     console.error(error)
     errorMessage.value = error instanceof Error ? error.message : String(error || 'unknown')
@@ -270,6 +299,9 @@ function startListening() {
 onBeforeUnmount(() => {
   isStartingListening.value = false
   clearListeningTimeout()
+  if (isSpeechSynthesisSupported.value) {
+    window.speechSynthesis.cancel()
+  }
   if (recognition) {
     recognition.onstart = null
     recognition.onend = null
