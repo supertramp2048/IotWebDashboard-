@@ -3,11 +3,8 @@ import axios from 'axios';
 // Lấy Device ID từ file .env
 const deviceId = import.meta.env.VITE_DEVICE_ID;
 
-// QUAN TRỌNG: Để rỗng chuỗi này.
-// Vì chúng ta dùng Proxy trong vite.config.js, nên request sẽ gửi đến localhost hiện tại.
 const API_URL = import.meta.env.VITE_API_URL || 'https://demo.thingsboard.io';
-//console.log(" API URL đang dùng là:", API_URL); // Bật Console (F12) để xem nó in ra cái gì
-// 1. Tạo instance Axios
+
 const API = axios.create({
     baseURL: API_URL,
     headers: {
@@ -266,30 +263,27 @@ const LOCAL_API = axios.create({
         'Content-Type': 'application/json'
     }
 });
+
 LOCAL_API.interceptors.request.use(config => {
-    // Lấy token đang đăng nhập (hoặc dùng biến token riêng nếu Python dùng hệ thống token khác)
     const token = localStorage.getItem('tb_token'); 
     if (token) {
-        // Lưu ý: Sửa 'Authorization' thành 'X-Authorization' nếu code Flask của bạn đang check key này
         config.headers['Authorization'] = `Bearer ${token}`; 
     }
     return config;
 }, error => {
     return Promise.reject(error);
 });
-// Lấy danh sách người dùng
+
 export async function getLocalUsers() {
     const res = await LOCAL_API.get('/list');
     return res.data;
 }
 
-// Đăng ký người dùng mới
 export async function registerLocalUser(name) {
     const res = await LOCAL_API.get(`/register?name=${encodeURIComponent(name)}`);
     return res.data;
 }
 
-// Xóa người dùng
 export async function deleteLocalUser(name) {
     const res = await LOCAL_API.post('/delete', { name });
     return res.data;

@@ -439,14 +439,20 @@ const confirmRegister = async () => {
   try {
     await registerLocalUser(registrationName.value)
     
-    alert(`✅ Đã thêm người dùng: ${registrationName.value}`)
+    alert(` Đã thêm người dùng: ${registrationName.value}`)
     registrationName.value = ''
     confirmRegisterText.value = ''
     showRegisterConfirmDialog.value = false
     fetchUserList()
   } catch (error) {
     console.error('Lỗi khi đăng ký người dùng:', error)
-    alert('❌ Lỗi kết nối. Vui lòng kiểm tra IP và cổng!')
+    if(error.status == 400){
+      alert('Khuôn mặt đã được đang ký trước đó và vẫn còn trong hệ thống !')
+    }
+    else{
+      alert(' Lỗi kết nối. Vui lòng kiểm tra IP và cổng!')
+    }
+    
   } finally {
     isRegisteringUser.value = false
   }
